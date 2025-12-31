@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "video-compression-optimizer"
+version = "0.1.0"
+description = "Apple Photos video compression optimizer using AWS MediaConvert"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Video Compression Optimizer Team" }
+]
+keywords = ["video", "compression", "h265", "hevc", "apple-photos", "aws", "mediaconvert"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video :: Conversion",
+]
+dependencies = [
+    "click>=8.0",
+    "osxphotos>=0.60",
+    "photoscript>=0.3",
+    "boto3>=1.26",
+    "ffmpeg-python>=0.2",
+    "rich>=13.0",
+    "requests>=2.28",
+    "requests-aws4auth>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "hypothesis>=6.0",
+    "mypy>=1.0",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+vco = "vco.cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vco"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+markers = [
+    "aws: tests that require AWS credentials and deployed infrastructure",
+    "deployed: tests that run against deployed AWS resources (requires SKIP_AWS_TESTS=false)",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["src/vco"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

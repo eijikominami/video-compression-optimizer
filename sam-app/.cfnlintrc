@@ -1,0 +1,9 @@
+templates:
+  - template.yaml
+
+ignore_checks:
+  - W3002  # Ignore warning about hardcoded credentials (we use IAM roles)
+
+configure_rules:
+  E3012:
+    strict: false  # Allow some flexibility in property types

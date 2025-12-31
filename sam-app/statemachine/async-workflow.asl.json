@@ -1,0 +1,357 @@
+{
+  "Comment": "Video Compression Optimizer Async Workflow",
+  "StartAt": "ValidateInput",
+  "States": {
+    "ValidateInput": {
+      "Type": "Task",
+      "Resource": "${WorkflowFunctionArn}",
+      "Parameters": {
+        "action": "validate_input",
+        "task_id.$": "$.task_id",
+        "user_id.$": "$.user_id",
+        "quality_preset.$": "$.quality_preset",
+        "files.$": "$.files"
+      },
+      "ResultPath": "$.validation",
+      "Next": "UpdateStatusToConverting",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ]
+    },
+    "UpdateStatusToConverting": {
+      "Type": "Task",
+      "Resource": "${WorkflowFunctionArn}",
+      "Parameters": {
+        "action": "update_status",
+        "task_id.$": "$.task_id",
+        "status": "CONVERTING",
+        "current_step": "converting"
+      },
+      "ResultPath": "$.status_update",
+      "Next": "ProcessFiles",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ]
+    },
+    "ProcessFiles": {
+      "Type": "Map",
+      "ItemsPath": "$.files",
+      "MaxConcurrency": 5,
+      "Parameters": {
+        "task_id.$": "$.task_id",
+        "user_id.$": "$.user_id",
+        "quality_preset.$": "$.quality_preset",
+        "file.$": "$$.Map.Item.Value"
+      },
+      "Iterator": {
+        "StartAt": "StartConversion",
+        "States": {
+          "StartConversion": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "start_conversion",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "quality_preset.$": "$.quality_preset"
+            },
+            "ResultPath": "$.conversion",
+            "Next": "WaitForConversion",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "PrepareFileErrorFromCatch"
+              }
+            ]
+          },
+          "WaitForConversion": {
+            "Type": "Wait",
+            "Seconds": 30,
+            "Next": "CheckConversionStatus"
+          },
+          "CheckConversionStatus": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "check_conversion_status",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "job_id.$": "$.conversion.job_id"
+            },
+            "ResultPath": "$.job_status",
+            "Next": "IsConversionComplete",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "PrepareFileErrorFromCatch"
+              }
+            ]
+          },
+          "IsConversionComplete": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.job_status.status",
+                "StringEquals": "COMPLETE",
+                "Next": "VerifyQuality"
+              },
+              {
+                "Variable": "$.job_status.status",
+                "StringEquals": "ERROR",
+                "Next": "HandleConversionError"
+              }
+            ],
+            "Default": "WaitForConversion"
+          },
+          "HandleConversionError": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "handle_conversion_error",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "error_code.$": "$.job_status.error_code",
+              "error_message.$": "$.job_status.error_message"
+            },
+            "ResultPath": "$.error_handling",
+            "Next": "ShouldRetryConversion",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "PrepareFileErrorFromCatch"
+              }
+            ]
+          },
+          "ShouldRetryConversion": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.error_handling.should_retry",
+                "BooleanEquals": true,
+                "Next": "StartConversion"
+              }
+            ],
+            "Default": "PrepareFileErrorFromConversion"
+          },
+          "PrepareFileErrorFromConversion": {
+            "Type": "Pass",
+            "Parameters": {
+              "task_id.$": "$.task_id",
+              "user_id.$": "$.user_id",
+              "quality_preset.$": "$.quality_preset",
+              "file.$": "$.file",
+              "error_message.$": "States.Format('Conversion error: code {}', $.error_handling.error_code)"
+            },
+            "Next": "FileError"
+          },
+          "VerifyQuality": {
+            "Type": "Task",
+            "Resource": "${QualityCheckerFunctionArn}",
+            "Parameters": {
+              "job_id.$": "$.conversion.job_id",
+              "original_s3_key.$": "$.file.source_s3_key",
+              "converted_s3_key.$": "$.job_status.output_s3_key"
+            },
+            "ResultPath": "$.quality_result",
+            "Next": "IsQualityOk",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "PrepareFileErrorFromCatch"
+              }
+            ]
+          },
+          "IsQualityOk": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.quality_result.body.status",
+                "StringEquals": "passed",
+                "Next": "FileSuccess"
+              }
+            ],
+            "Default": "HandleQualityFailure"
+          },
+          "HandleQualityFailure": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "handle_quality_failure",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "quality_preset.$": "$.quality_preset",
+              "quality_result.$": "$.quality_result"
+            },
+            "ResultPath": "$.quality_handling",
+            "Next": "ShouldRetryWithHigherPreset",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "PrepareFileErrorFromCatch"
+              }
+            ]
+          },
+          "ShouldRetryWithHigherPreset": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.quality_handling.should_retry",
+                "BooleanEquals": true,
+                "Next": "UpdatePresetAndRetry"
+              },
+              {
+                "And": [
+                  {
+                    "Variable": "$.quality_handling.should_retry",
+                    "BooleanEquals": false
+                  },
+                  {
+                    "Variable": "$.quality_handling.reason",
+                    "StringEquals": "best_effort"
+                  }
+                ],
+                "Next": "FileSuccessBestEffort"
+              }
+            ],
+            "Default": "PrepareFileErrorFromQuality"
+          },
+          "FileSuccessBestEffort": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "file_complete",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "status": "COMPLETED",
+              "output_s3_key.$": "$.job_status.output_s3_key",
+              "quality_result.$": "$.quality_result",
+              "best_effort": true
+            },
+            "ResultPath": "$.file_result",
+            "End": true
+          },
+          "PrepareFileErrorFromQuality": {
+            "Type": "Pass",
+            "Parameters": {
+              "task_id.$": "$.task_id",
+              "user_id.$": "$.user_id",
+              "quality_preset.$": "$.quality_preset",
+              "file.$": "$.file",
+              "error_message.$": "States.Format('Quality check failed: {}', $.quality_handling.reason)"
+            },
+            "Next": "FileError"
+          },
+          "UpdatePresetAndRetry": {
+            "Type": "Pass",
+            "Parameters": {
+              "task_id.$": "$.task_id",
+              "user_id.$": "$.user_id",
+              "quality_preset.$": "$.quality_handling.next_preset",
+              "file.$": "$.quality_handling.updated_file"
+            },
+            "Next": "StartConversion"
+          },
+          "FileSuccess": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "file_complete",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "status": "COMPLETED",
+              "output_s3_key.$": "$.job_status.output_s3_key",
+              "quality_result.$": "$.quality_result"
+            },
+            "ResultPath": "$.file_result",
+            "End": true
+          },
+          "PrepareFileErrorFromCatch": {
+            "Type": "Pass",
+            "Parameters": {
+              "task_id.$": "$.task_id",
+              "user_id.$": "$.user_id",
+              "quality_preset.$": "$.quality_preset",
+              "file.$": "$.file",
+              "error_message.$": "States.Format('Error: {}', $.error.Cause)"
+            },
+            "Next": "FileError"
+          },
+          "FileError": {
+            "Type": "Task",
+            "Resource": "${WorkflowFunctionArn}",
+            "Parameters": {
+              "action": "file_complete",
+              "task_id.$": "$.task_id",
+              "file.$": "$.file",
+              "status": "FAILED",
+              "error_message.$": "$.error_message"
+            },
+            "ResultPath": "$.file_result",
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.results",
+      "Next": "AggregateResults",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ]
+    },
+    "AggregateResults": {
+      "Type": "Task",
+      "Resource": "${WorkflowFunctionArn}",
+      "Parameters": {
+        "action": "aggregate_results",
+        "task_id.$": "$.task_id",
+        "results.$": "$.results"
+      },
+      "ResultPath": "$.aggregation",
+      "Next": "UpdateFinalStatus",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ]
+    },
+    "UpdateFinalStatus": {
+      "Type": "Task",
+      "Resource": "${WorkflowFunctionArn}",
+      "Parameters": {
+        "action": "update_status",
+        "task_id.$": "$.task_id",
+        "status.$": "$.aggregation.final_status",
+        "current_step": "completed"
+      },
+      "End": true
+    },
+    "HandleError": {
+      "Type": "Task",
+      "Resource": "${WorkflowFunctionArn}",
+      "Parameters": {
+        "action": "handle_error",
+        "task_id.$": "$.task_id",
+        "error.$": "$.error"
+      },
+      "End": true
+    }
+  }
+}

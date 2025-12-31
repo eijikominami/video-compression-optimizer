@@ -1,0 +1,636 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Video Compression Optimizer - AWS Infrastructure
+  S3 bucket, IAM roles, and Lambda function for video quality verification
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: General Configuration
+        Parameters:
+          - Environment
+          - LogsRetentionInDays
+      - Label:
+          default: S3 Configuration
+        Parameters:
+          - BucketNameSuffix
+      - Label:
+          default: Lambda Configuration
+        Parameters:
+          - LambdaMemorySize
+          - LambdaTimeout
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  LogsRetentionInDays:
+    Type: Number
+    Default: 30
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 150
+      - 180
+      - 365
+      - 400
+      - 545
+      - 731
+      - 1096
+      - 1827
+      - 2192
+      - 2557
+      - 2922
+      - 3288
+      - 3653
+    Description: CloudWatch Logs retention period in days
+
+  BucketNameSuffix:
+    Type: String
+    Default: ''
+    Description: Optional suffix for S3 bucket name (for uniqueness)
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 3008
+    MinValue: 128
+    MaxValue: 10240
+    Description: Lambda function memory size in MB (3008+ recommended for video processing)
+
+  LambdaTimeout:
+    Type: Number
+    Default: 900
+    MinValue: 1
+    MaxValue: 900
+    Description: Lambda function timeout in seconds (max 15 minutes)
+
+Globals:
+  Function:
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        LOG_LEVEL: INFO
+
+Resources:
+  # S3 Bucket for video files and quality check results
+  VideoStorageBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If
+        - HasBucketSuffix
+        - !Sub 'vco-video-storage-${AWS::AccountId}-${BucketNameSuffix}'
+        - !Sub 'vco-video-storage-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteTempFilesAfter7Days
+            Status: Enabled
+            Prefix: temp/
+            ExpirationInDays: 7
+          - Id: DeleteAsyncInputFilesAfter7Days
+            Status: Enabled
+            Prefix: async/
+            ExpirationInDays: 7
+          - Id: DeleteInputFilesAfter30Days
+            Status: Enabled
+            Prefix: input/
+            ExpirationInDays: 30
+          - Id: DeleteOutputFilesAfter7Days
+            Status: Enabled
+            Prefix: output/
+            ExpirationInDays: 7
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  # IAM Role for MediaConvert
+  MediaConvertRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'vco-mediaconvert-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: mediaconvert.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MediaConvertS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub '${VideoStorageBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt VideoStorageBucket.Arn
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Quality Checker Lambda Function
+  QualityCheckerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'vco-quality-checker-${Environment}'
+      Description: Validates video conversion quality (SSIM, file size, playback)
+      CodeUri: quality-checker/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - x86_64
+      MemorySize: !Ref LambdaMemorySize
+      Timeout: !Ref LambdaTimeout
+      EphemeralStorage:
+        Size: 10240  # 10GB - required for processing large video files (up to ~5GB each)
+      Layers:
+        # Custom FFmpeg layer (created from static build)
+        - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:vco-ffmpeg:2'
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref VideoStorageBucket
+          SSIM_THRESHOLD: '0.95'
+          # FFmpeg binary path in Lambda layer
+          PATH: /opt/bin:/var/lang/bin:/usr/local/bin:/usr/bin:/bin
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref VideoStorageBucket
+        - S3WritePolicy:
+            BucketName: !Ref VideoStorageBucket
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # DynamoDB Table for Async Tasks
+  AsyncTasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'vco-async-tasks-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: task_id
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: task_id
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1-UserTasks
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2-StatusTasks
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  # =============================================================================
+  # Async Workflow API Gateway
+  # =============================================================================
+
+  # REST API for async workflow
+  AsyncWorkflowApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub 'vco-async-api-${Environment}'
+      StageName: !Ref Environment
+      Description: API for async video conversion workflow
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-User-Id,Authorization'"
+        AllowOrigin: "'*'"
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # =============================================================================
+  # Async Task Lambda Functions
+  # =============================================================================
+
+  # Task Submit Lambda
+  AsyncTaskSubmitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'vco-async-task-submit-${Environment}'
+      Description: Handles async task submission
+      CodeUri: async-task-submit/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - x86_64
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref AsyncTasksTable
+          S3_BUCKET: !Ref VideoStorageBucket
+          STATE_MACHINE_ARN: !Ref AsyncWorkflowStateMachine
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AsyncTasksTable
+        - S3CrudPolicy:
+            BucketName: !Ref VideoStorageBucket
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt AsyncWorkflowStateMachine.Name
+      Events:
+        SubmitTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AsyncWorkflowApi
+            Path: /tasks
+            Method: POST
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # Task Status Lambda
+  AsyncTaskStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'vco-async-task-status-${Environment}'
+      Description: Handles async task status queries
+      CodeUri: async-task-status/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - x86_64
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref AsyncTasksTable
+          S3_BUCKET: !Ref VideoStorageBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AsyncTasksTable
+        - S3ReadPolicy:
+            BucketName: !Ref VideoStorageBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - mediaconvert:GetJob
+                - mediaconvert:DescribeEndpoints
+              Resource: '*'
+      Events:
+        ListTasks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AsyncWorkflowApi
+            Path: /tasks
+            Method: GET
+        GetTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AsyncWorkflowApi
+            Path: /tasks/{task_id}
+            Method: GET
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # Task Cancel Lambda
+  AsyncTaskCancelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'vco-async-task-cancel-${Environment}'
+      Description: Handles async task cancellation
+      CodeUri: async-task-cancel/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - x86_64
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref AsyncTasksTable
+          S3_BUCKET: !Ref VideoStorageBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AsyncTasksTable
+        - S3CrudPolicy:
+            BucketName: !Ref VideoStorageBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StopExecution
+              Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:vco-async-workflow-${Environment}:*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - mediaconvert:GetJob
+                - mediaconvert:CancelJob
+                - mediaconvert:DescribeEndpoints
+              Resource: '*'
+      Events:
+        CancelTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AsyncWorkflowApi
+            Path: /tasks/{task_id}/cancel
+            Method: POST
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # =============================================================================
+  # Step Functions State Machine (placeholder - will be updated in Task 6)
+  # =============================================================================
+
+  # Workflow Lambda for Step Functions
+  AsyncWorkflowFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'vco-async-workflow-${Environment}'
+      Description: Workflow orchestration for async video conversion
+      CodeUri: async-workflow/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref AsyncTasksTable
+          S3_BUCKET: !Ref VideoStorageBucket
+          MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
+          QUALITY_CHECKER_ARN: !GetAtt QualityCheckerFunction.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AsyncTasksTable
+        - S3CrudPolicy:
+            BucketName: !Ref VideoStorageBucket
+        - LambdaInvokePolicy:
+            FunctionName: !Ref QualityCheckerFunction
+        - Statement:
+            - Effect: Allow
+              Action:
+                - mediaconvert:CreateJob
+                - mediaconvert:GetJob
+                - mediaconvert:CancelJob
+                - mediaconvert:DescribeEndpoints
+                - mediaconvert:TagResource
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt MediaConvertRole.Arn
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # Step Functions State Machine
+  AsyncWorkflowStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub 'vco-async-workflow-${Environment}'
+      DefinitionUri: statemachine/async-workflow.asl.json
+      DefinitionSubstitutions:
+        WorkflowFunctionArn: !GetAtt AsyncWorkflowFunction.Arn
+        QualityCheckerFunctionArn: !GetAtt QualityCheckerFunction.Arn
+        DynamoDBTableName: !Ref AsyncTasksTable
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AsyncWorkflowFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref QualityCheckerFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AsyncTasksTable
+      Tags:
+        Application: VideoCompressionOptimizer
+        Environment: !Ref Environment
+
+  # =============================================================================
+  # CloudWatch Log Groups for Async Functions
+  # =============================================================================
+
+  AsyncTaskSubmitLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AsyncTaskSubmitFunction}'
+      RetentionInDays: !Ref LogsRetentionInDays
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  AsyncTaskStatusLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AsyncTaskStatusFunction}'
+      RetentionInDays: !Ref LogsRetentionInDays
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  AsyncTaskCancelLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AsyncTaskCancelFunction}'
+      RetentionInDays: !Ref LogsRetentionInDays
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  AsyncWorkflowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AsyncWorkflowFunction}'
+      RetentionInDays: !Ref LogsRetentionInDays
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudWatch Log Group for Quality Checker
+  QualityCheckerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${QualityCheckerFunction}'
+      RetentionInDays: !Ref LogsRetentionInDays
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+  # IAM User for CLI access (optional, for local development)
+  CLIAccessUser:
+    Type: AWS::IAM::User
+    Condition: IsDevelopment
+    Properties:
+      UserName: !Sub 'vco-cli-user-${Environment}'
+      Policies:
+        - PolicyName: VCOCLIAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt VideoStorageBucket.Arn
+                  - !Sub '${VideoStorageBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - mediaconvert:CreateJob
+                  - mediaconvert:GetJob
+                  - mediaconvert:CancelJob
+                  - mediaconvert:ListJobs
+                  - mediaconvert:DescribeEndpoints
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt MediaConvertRole.Arn
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt QualityCheckerFunction.Arn
+              - Effect: Allow
+                Action:
+                  - execute-api:Invoke
+                Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AsyncWorkflowApi}/*'
+      Tags:
+        - Key: Application
+          Value: VideoCompressionOptimizer
+        - Key: Environment
+          Value: !Ref Environment
+
+Conditions:
+  HasBucketSuffix: !Not [!Equals [!Ref BucketNameSuffix, '']]
+  IsDevelopment: !Equals [!Ref Environment, 'dev']
+
+Outputs:
+  VideoStorageBucketName:
+    Description: S3 bucket name for video storage
+    Value: !Ref VideoStorageBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+
+  VideoStorageBucketArn:
+    Description: S3 bucket ARN for video storage
+    Value: !GetAtt VideoStorageBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+
+  MediaConvertRoleArn:
+    Description: IAM role ARN for MediaConvert
+    Value: !GetAtt MediaConvertRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-MediaConvertRoleArn'
+
+  QualityCheckerFunctionArn:
+    Description: Quality Checker Lambda function ARN
+    Value: !GetAtt QualityCheckerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-QualityCheckerArn'
+
+  QualityCheckerFunctionName:
+    Description: Quality Checker Lambda function name
+    Value: !Ref QualityCheckerFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-QualityCheckerName'
+
+  AsyncTasksTableName:
+    Description: DynamoDB table name for async tasks
+    Value: !Ref AsyncTasksTable
+    Export:
+      Name: !Sub '${AWS::StackName}-AsyncTasksTableName'
+
+  AsyncTasksTableArn:
+    Description: DynamoDB table ARN for async tasks
+    Value: !GetAtt AsyncTasksTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-AsyncTasksTableArn'
+
+  AsyncWorkflowApiUrl:
+    Description: API Gateway URL for async workflow
+    Value: !Sub 'https://${AsyncWorkflowApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-AsyncApiUrl'
+
+  AsyncWorkflowStateMachineArn:
+    Description: Step Functions state machine ARN
+    Value: !Ref AsyncWorkflowStateMachine
+    Export:
+      Name: !Sub '${AWS::StackName}-StateMachineArn'
