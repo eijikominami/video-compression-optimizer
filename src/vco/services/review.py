@@ -14,8 +14,8 @@ from datetime import datetime
 from pathlib import Path
 
 from vco.metadata.manager import MetadataManager, VideoMetadata
+from vco.models.types import ConversionResult
 from vco.photos.manager import PhotosAccessManager
-from vco.services.convert import ConversionResult
 
 logger = logging.getLogger(__name__)
 

@@ -22,11 +22,8 @@ from rich.table import Table
 from vco.analyzer.analyzer import CompressionAnalyzer
 from vco.cli.i18n import get_help
 from vco.config.manager import ConfigManager
-from vco.converter.mediaconvert import MediaConvertClient
 from vco.metadata.manager import MetadataManager
 from vco.photos.manager import PhotosAccessManager
-from vco.quality.checker import QualityChecker
-from vco.services.convert import ConversionProgress, ConvertService
 from vco.services.import_service import ImportService
 from vco.services.review import ReviewService
 from vco.services.scan import ScanService
@@ -221,9 +218,8 @@ scan.help = get_help("scan.description")
 )
 @click.option("--top-n", type=int, help=get_help("convert.top_n"))
 @click.option("--dry-run", is_flag=True, help=get_help("convert.dry_run"))
-@click.option("--async", "async_mode", is_flag=True, help=get_help("convert.async"))
 @click.pass_context
-def convert(ctx, quality: str, top_n: int | None, dry_run: bool, async_mode: bool):
+def convert(ctx, quality: str, top_n: int | None, dry_run: bool):
     """Convert candidate videos to H.265."""
     config = ctx.obj["config"]
 
@@ -278,125 +274,8 @@ def convert(ctx, quality: str, top_n: int | None, dry_run: bool, async_mode: boo
         )
         sys.exit(1)
 
-    # Handle async mode
-    if async_mode:
-        _convert_async(ctx, candidates_to_convert, quality, aws_config)
-        return
-
-    console.print()
-    console.print("[yellow]Conversion requires AWS credentials and will incur costs.[/yellow]")
-    console.print("[yellow]Use 'vco convert --dry-run' to preview without converting.[/yellow]")
-
-    if not click.confirm("Do you want to proceed?"):
-        console.print("Cancelled.")
-        return
-
-    # Initialize services
-    try:
-        mediaconvert_client = MediaConvertClient(
-            region=aws_config.region,
-            s3_bucket=aws_config.s3_bucket,
-            role_arn=aws_config.role_arn,
-            profile_name=aws_config.profile,
-        )
-    except Exception as e:
-        console.print(f"[red]Failed to initialize AWS client: {e}[/red]")
-        sys.exit(1)
-
-    quality_checker = QualityChecker(
-        region=aws_config.region,
-        s3_bucket=aws_config.s3_bucket,
-        lambda_function_name=aws_config.quality_checker_function or "vco-quality-checker-dev",
-        profile_name=aws_config.profile,
-    )
-
-    metadata_manager = MetadataManager()
-
-    # Initialize PhotosAccessManager for iCloud downloads
-    photos_manager = PhotosAccessManager()
-
-    staging_folder = Path(config.get("conversion.staging_folder")).expanduser()
-
-    # Progress callback
-    current_progress = {}
-
-    def progress_callback(progress: ConversionProgress):
-        current_progress[progress.uuid] = progress
-        status_icon = {
-            "uploading": "⬆️",
-            "downloading_icloud": "☁️",
-            "converting": "🔄",
-            "checking": "✅",
-            "downloading": "⬇️",
-            "complete": "✓",
-            "failed": "✗",
-        }.get(progress.stage, "?")
-        console.print(
-            f"  {status_icon} {progress.filename}: {progress.stage} ({progress.progress_percent}%)"
-        )
-
-    # Initialize ReviewService for auto-registration
-    review_service = ReviewService()
-
-    convert_service = ConvertService(
-        mediaconvert_client=mediaconvert_client,
-        quality_checker=quality_checker,
-        metadata_manager=metadata_manager,
-        photos_manager=photos_manager,
-        staging_folder=staging_folder,
-        progress_callback=progress_callback,
-        review_service=review_service,
-    )
-
-    # Estimate cost
-    estimated_cost = convert_service.estimate_batch_cost(candidates_to_convert)
-    console.print(f"[yellow]Estimated AWS cost: ${estimated_cost:.2f}[/yellow]")
-    console.print()
-
-    # Run conversion
-    console.print("[bold]Starting conversion...[/bold]")
-    console.print()
-
-    try:
-        batch_result = convert_service.convert_batch(
-            candidates=candidates_to_convert,
-            quality_preset=quality,
-            max_concurrent=config.get("conversion.max_concurrent"),
-        )
-    except Exception as e:
-        console.print(f"[red]Conversion failed: {e}[/red]")
-        sys.exit(1)
-
-    # Display results
-    console.print()
-    console.print("[bold]Conversion Complete[/bold]")
-    console.print(f"  Total: {batch_result.total}")
-    console.print(f"  Successful: [green]{batch_result.successful}[/green]")
-    console.print(f"  Failed: [red]{batch_result.failed}[/red]")
-    console.print(f"  Added to review queue: [cyan]{batch_result.added_to_queue}[/cyan]")
-
-    # Display best-effort mode results
-    best_effort_results = [r for r in batch_result.results if r.best_effort]
-    if best_effort_results:
-        console.print()
-        console.print("[yellow]Best-effort mode used:[/yellow]")
-        for result in best_effort_results:
-            ssim = result.quality_result.ssim_score if result.quality_result else "N/A"
-            ssim_str = f"{ssim:.4f}" if isinstance(ssim, float) else ssim
-            console.print(
-                f"  - {result.filename}: preset={result.selected_preset}, SSIM={ssim_str}"
-            )
-
-    if batch_result.errors:
-        console.print()
-        console.print("[red]Errors:[/red]")
-        for error in batch_result.errors:
-            console.print(f"  - {error}")
-
-    if batch_result.successful > 0:
-        console.print()
-        console.print(f"[green]Converted files saved to: {staging_folder}[/green]")
-        console.print("[dim]Run 'vco import --list' to see pending imports[/dim]")
+    # Execute async conversion
+    _convert_async(ctx, candidates_to_convert, quality, aws_config)
 
 
 # Override convert help text dynamically based on locale

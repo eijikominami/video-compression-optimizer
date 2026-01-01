@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from vco.models.async_task import AsyncFile, AsyncTask, FileStatus, TaskStatus
-from vco.models.types import VideoInfo
-from vco.services.convert import ConversionResult
+from vco.models.types import ConversionResult, VideoInfo
 
 
 def async_file_to_api(file: AsyncFile) -> dict[str, Any]:

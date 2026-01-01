@@ -531,3 +531,147 @@ class UnifiedClearResult:
     def total_files_failed(self) -> int:
         """Total number of files that failed to delete from both sources."""
         return self.local_files_failed + self.aws_files_failed
+
+
+# =============================================================================
+# Conversion Result Models (moved from services/convert.py)
+# =============================================================================
+
+
+@dataclass
+class ConversionProgress:
+    """Progress information for a conversion.
+
+    Attributes:
+        uuid: Unique identifier for the video
+        filename: Name of the video file
+        stage: Current stage of conversion
+        progress_percent: Progress percentage (0-100)
+        error_message: Error message if conversion failed
+        job_id: MediaConvert job ID
+        quality_job_id: Quality check job ID
+    """
+
+    uuid: str
+    filename: str
+    stage: str  # 'uploading', 'converting', 'checking', 'downloading', 'complete', 'failed'
+    progress_percent: int = 0
+    error_message: str | None = None
+    job_id: str | None = None
+    quality_job_id: str | None = None
+
+
+@dataclass
+class AttemptResult:
+    """Result of a single preset attempt in adaptive conversion.
+
+    Used to track each preset attempt during best-effort mode conversion,
+    allowing comparison of SSIM scores to select the best result.
+
+    Attributes:
+        preset: Preset name used for this attempt
+        ssim_score: SSIM score (None if conversion failed)
+        quality_result: Full quality check result
+        output_s3_key: S3 key for converted file
+        source_s3_key: S3 key for source file
+        metadata_s3_key: S3 key for metadata JSON
+        success: Whether conversion itself succeeded
+        error_message: Error message if conversion failed
+    """
+
+    preset: str
+    ssim_score: float | None
+    quality_result: QualityResult | None
+    output_s3_key: str
+    source_s3_key: str
+    metadata_s3_key: str
+    success: bool
+    error_message: str | None = None
+
+
+@dataclass
+class ConversionResult(BaseVideoMetadata):
+    """Result of a single video conversion.
+
+    Inherits common fields (uuid, filename, file_size, capture_date, location)
+    from BaseVideoMetadata.
+
+    Attributes:
+        success: Whether conversion itself succeeded
+        original_path: Path to the original video file
+        converted_path: Path to the converted video file
+        quality_result: Quality verification result
+        metadata: Preserved metadata from original video
+        error_message: Error message if conversion failed
+        mediaconvert_job_id: MediaConvert job ID
+        quality_job_id: Quality check job ID
+        best_effort: True if best-effort mode was used
+        selected_preset: Preset that was selected (for adaptive presets)
+    """
+
+    # ConversionResult specific fields (all with defaults to avoid dataclass issues)
+    success: bool = False
+    original_path: Path = field(default_factory=Path)
+    converted_path: Path | None = None
+    quality_result: QualityResult | None = None
+    metadata: VideoMetadata | None = None
+    error_message: str | None = None
+    mediaconvert_job_id: str | None = None
+    quality_job_id: str | None = None
+    best_effort: bool = False
+    selected_preset: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary format including base fields."""
+        base_dict = super().to_dict()
+        base_dict.update(
+            {
+                "success": self.success,
+                "original_path": str(self.original_path),
+                "converted_path": str(self.converted_path) if self.converted_path else None,
+                "quality_result": self.quality_result.__dict__ if self.quality_result else None,
+                "metadata": self.metadata.__dict__ if self.metadata else None,
+                "error_message": self.error_message,
+                "mediaconvert_job_id": self.mediaconvert_job_id,
+                "quality_job_id": self.quality_job_id,
+                "best_effort": self.best_effort,
+                "selected_preset": self.selected_preset,
+            }
+        )
+        return base_dict
+
+
+@dataclass
+class BatchConversionResult:
+    """Result of batch conversion.
+
+    Attributes:
+        total: Total number of videos processed
+        successful: Number of successful conversions
+        failed: Number of failed conversions
+        added_to_queue: Number of items added to review queue
+        results: List of individual conversion results
+        errors: List of error messages
+    """
+
+    total: int = 0
+    successful: int = 0
+    failed: int = 0
+    added_to_queue: int = 0
+    results: list[ConversionResult] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "total": self.total,
+            "successful": self.successful,
+            "failed": self.failed,
+            "added_to_queue": self.added_to_queue,
+            "results": [self._result_to_dict(r) for r in self.results],
+            "errors": self.errors,
+        }
+
+    def _result_to_dict(self, result: ConversionResult) -> dict:
+        """Convert a result to dictionary."""
+        return result.to_dict()
