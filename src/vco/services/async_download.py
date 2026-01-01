@@ -183,6 +183,20 @@ class DownloadCommand:
                 error_message="No successful files to download",
             )
 
+        # Validate output_s3_key for all successful files (Requirement 5.6, Property 7)
+        files_missing_s3_key = [f for f in successful_files if not f.output_s3_key]
+        if files_missing_s3_key:
+            missing_filenames = [f.filename for f in files_missing_s3_key]
+            return DownloadResult(
+                task_id=task_id,
+                success=False,
+                total_files=len(task.files),
+                downloaded_files=0,
+                failed_files=len(files_missing_s3_key),
+                added_to_queue=0,
+                error_message=f"Files missing output_s3_key: {', '.join(missing_filenames)}",
+            )
+
         result = DownloadResult(
             task_id=task_id,
             success=True,
@@ -204,6 +218,9 @@ class DownloadCommand:
 
             if file_result.success:
                 result.downloaded_files += 1
+
+                # Update download status in DynamoDB
+                self._update_download_status(task_id, file_detail.file_id, "completed")
 
                 # Add to review queue
                 if self._add_to_review_queue(task_id, file_detail, file_result.local_path, task):
@@ -342,13 +359,30 @@ class DownloadCommand:
                 resumed=resumed,
             )
 
-        except Exception as e:
-            logger.exception(f"Failed to download {filename}")
+        except self.s3_client.exceptions.NoSuchKey:
+            logger.warning(f"File not found in S3: {s3_key}")
             return FileDownloadResult(
                 file_id=file_id,
                 filename=filename,
                 success=False,
-                error_message=str(e),
+                error_message="File not found in S3. The conversion may still be in progress.",
+            )
+        except Exception as e:
+            # Extract user-friendly message from boto exceptions
+            error_msg = str(e)
+            if "404" in error_msg or "Not Found" in error_msg:
+                error_msg = "File not found in S3. The conversion may still be in progress."
+            elif "403" in error_msg or "Forbidden" in error_msg:
+                error_msg = "Access denied to S3 file. Check your AWS credentials."
+            elif "ExpiredToken" in error_msg:
+                error_msg = "AWS credentials have expired. Please refresh your credentials."
+
+            logger.warning(f"Failed to download {filename}: {error_msg}")
+            return FileDownloadResult(
+                file_id=file_id,
+                filename=filename,
+                success=False,
+                error_message=error_msg,
             )
 
     def _download_with_progress(
@@ -587,4 +621,27 @@ class DownloadCommand:
             return True
         except Exception as e:
             logger.warning(f"Failed to delete S3 file {s3_key}: {e}")
+            return False
+
+    def _update_download_status(self, task_id: str, file_id: str, status: str) -> bool:
+        """Update file status to DOWNLOADED in DynamoDB.
+
+        Args:
+            task_id: Task ID
+            file_id: File ID
+            status: Status value (only "completed" is supported, which sets status to DOWNLOADED)
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        if status != "completed":
+            logger.warning(f"Unsupported status: {status}, only 'completed' is supported")
+            return False
+
+        try:
+            self.status_command.update_file_status_to_downloaded(task_id, file_id)
+            logger.info(f"Updated file status to DOWNLOADED for {file_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to update file status for {file_id}: {e}")
             return False

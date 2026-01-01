@@ -14,12 +14,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from vco.analyzer.analyzer import ConversionCandidate
 from vco.converter import get_adaptive_preset_chain, is_adaptive_preset
 from vco.converter.mediaconvert import MediaConvertClient
 from vco.metadata.manager import MetadataManager, VideoMetadata
+from vco.models.base import BaseVideoMetadata
 from vco.photos.manager import PhotosAccessManager
 from vco.quality.checker import QualityChecker, QualityResult
 from vco.utils.disk import (
@@ -72,21 +73,55 @@ class AttemptResult:
 
 
 @dataclass
-class ConversionResult:
-    """Result of a single video conversion."""
+class ConversionResult(BaseVideoMetadata):
+    """Result of a single video conversion.
 
-    uuid: str
-    filename: str
-    success: bool
-    original_path: Path
+    Inherits common fields (uuid, filename, file_size, capture_date, location)
+    from BaseVideoMetadata.
+
+    Attributes:
+        success: Whether conversion itself succeeded
+        original_path: Path to the original video file
+        converted_path: Path to the converted video file
+        quality_result: Quality verification result
+        metadata: Preserved metadata from original video
+        error_message: Error message if conversion failed
+        mediaconvert_job_id: MediaConvert job ID
+        quality_job_id: Quality check job ID
+        best_effort: True if best-effort mode was used
+        selected_preset: Preset that was selected (for adaptive presets)
+    """
+
+    # ConversionResult specific fields (all with defaults to avoid dataclass issues)
+    success: bool = False
+    original_path: Path = Path()
     converted_path: Path | None = None
     quality_result: QualityResult | None = None
     metadata: VideoMetadata | None = None
     error_message: str | None = None
     mediaconvert_job_id: str | None = None
     quality_job_id: str | None = None
-    best_effort: bool = False  # True if best-effort mode was used
-    selected_preset: str | None = None  # Preset that was selected (for adaptive presets)
+    best_effort: bool = False
+    selected_preset: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary format including base fields."""
+        base_dict = super().to_dict()
+        base_dict.update(
+            {
+                "success": self.success,
+                "original_path": str(self.original_path),
+                "converted_path": str(self.converted_path) if self.converted_path else None,
+                "quality_result": self.quality_result.__dict__ if self.quality_result else None,
+                "metadata": self.metadata.__dict__ if self.metadata else None,
+                "error_message": self.error_message,
+                "mediaconvert_job_id": self.mediaconvert_job_id,
+                "quality_job_id": self.quality_job_id,
+                "best_effort": self.best_effort,
+                "selected_preset": self.selected_preset,
+            }
+        )
+        return base_dict
 
 
 @dataclass

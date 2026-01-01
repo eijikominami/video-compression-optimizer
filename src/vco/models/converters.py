@@ -6,10 +6,14 @@ CLI models and API request/response formats.
 Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
 """
 
+import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from vco.models.async_task import AsyncFile, AsyncTask, FileStatus, TaskStatus
+from vco.models.types import VideoInfo
+from vco.services.convert import ConversionResult
 
 
 def async_file_to_api(file: AsyncFile) -> dict[str, Any]:
@@ -27,8 +31,11 @@ def async_file_to_api(file: AsyncFile) -> dict[str, Any]:
     """
     return {
         "file_id": file.file_id,
-        "original_uuid": file.original_uuid,
+        "original_uuid": file.uuid,  # For backward compatibility
         "filename": file.filename,
+        "file_size": file.file_size,  # Include base field
+        "capture_date": file.capture_date.isoformat() if file.capture_date else None,
+        "location": list(file.location) if file.location else None,
         "source_s3_key": file.source_s3_key,
         "output_s3_key": file.output_s3_key,
         "metadata_s3_key": file.metadata_s3_key,
@@ -61,14 +68,17 @@ def api_to_async_file(data: dict[str, Any]) -> AsyncFile:
 
     Requirements: 2.2, 2.4
     """
-    downloaded_at = None
-    if data.get("downloaded_at"):
-        downloaded_at = datetime.fromisoformat(data["downloaded_at"])
-
     return AsyncFile(
-        file_id=data["file_id"],
-        original_uuid=data.get("original_uuid", ""),
+        # Base fields - use uuid instead of original_uuid
+        uuid=data.get("original_uuid", data.get("uuid", "")),
         filename=data["filename"],
+        file_size=data.get("file_size", data.get("source_size_bytes", 0)),
+        capture_date=datetime.fromisoformat(data["capture_date"])
+        if data.get("capture_date")
+        else None,
+        location=tuple(data["location"]) if data.get("location") else None,
+        # AsyncFile specific fields
+        file_id=data["file_id"],
         source_s3_key=data.get("source_s3_key", ""),
         output_s3_key=data.get("output_s3_key"),
         metadata_s3_key=data.get("metadata_s3_key"),
@@ -83,8 +93,10 @@ def api_to_async_file(data: dict[str, Any]) -> AsyncFile:
         output_size_bytes=data.get("output_size_bytes"),
         output_checksum=data.get("output_checksum"),
         checksum_algorithm=data.get("checksum_algorithm", "ETag"),
-        downloaded_at=downloaded_at,
-        download_available=data.get("download_available", True),
+        downloaded_at=datetime.fromisoformat(data["downloaded_at"])
+        if data.get("downloaded_at")
+        else None,
+        download_available=data.get("download_available", False),
     )
 
 
@@ -158,4 +170,98 @@ def api_to_async_task(data: dict[str, Any]) -> AsyncTask:
             else None
         ),
         max_concurrent=data.get("max_concurrent", 5),
+    )
+
+
+# =============================================================================
+# New Unified Conversion Functions
+# =============================================================================
+
+
+def video_info_to_async_file(video: VideoInfo, file_id: str | None = None) -> AsyncFile:
+    """Convert VideoInfo to AsyncFile for async workflow.
+
+    This is the ONLY function for VideoInfo -> AsyncFile conversion.
+
+    Args:
+        video: VideoInfo object from scan
+        file_id: Unique file ID (generates UUID if not provided)
+
+    Returns:
+        AsyncFile object ready for async processing
+    """
+    if file_id is None:
+        file_id = str(uuid.uuid4())
+
+    return AsyncFile(
+        # Base fields from VideoInfo
+        uuid=video.uuid,
+        filename=video.filename,
+        file_size=video.file_size,
+        capture_date=video.capture_date,
+        location=video.location,
+        # AsyncFile specific fields
+        file_id=file_id,
+        source_s3_key="",  # Will be set during upload
+        status=FileStatus.PENDING,
+        source_size_bytes=video.file_size,  # For backward compatibility
+    )
+
+
+def async_file_to_conversion_result(async_file: AsyncFile, original_path: Path) -> ConversionResult:
+    """Convert AsyncFile to ConversionResult for import workflow.
+
+    This is the ONLY function for AsyncFile -> ConversionResult conversion.
+
+    Args:
+        async_file: AsyncFile from async workflow
+        original_path: Path to original video file
+
+    Returns:
+        ConversionResult object for import
+    """
+    return ConversionResult(
+        # Base fields from AsyncFile
+        uuid=async_file.uuid,
+        filename=async_file.filename,
+        file_size=async_file.file_size,
+        capture_date=async_file.capture_date,
+        location=async_file.location,
+        # ConversionResult specific fields
+        success=async_file.status == FileStatus.COMPLETED,
+        original_path=original_path,
+        converted_path=None,  # Will be set after download
+        quality_result=None,  # Will be populated from async_file.quality_result
+        error_message=async_file.error_message,
+        mediaconvert_job_id=async_file.mediaconvert_job_id,
+        best_effort=False,  # Will be determined from quality_result
+    )
+
+
+def video_info_to_conversion_result(
+    video: VideoInfo, success: bool = False, error_message: str | None = None
+) -> ConversionResult:
+    """Convert VideoInfo to ConversionResult for sync workflow.
+
+    This is the ONLY function for VideoInfo -> ConversionResult conversion.
+
+    Args:
+        video: VideoInfo object from scan
+        success: Whether conversion succeeded
+        error_message: Error message if conversion failed
+
+    Returns:
+        ConversionResult object
+    """
+    return ConversionResult(
+        # Base fields from VideoInfo
+        uuid=video.uuid,
+        filename=video.filename,
+        file_size=video.file_size,
+        capture_date=video.capture_date,
+        location=video.location,
+        # ConversionResult specific fields
+        success=success,
+        original_path=video.path,
+        error_message=error_message,
     )

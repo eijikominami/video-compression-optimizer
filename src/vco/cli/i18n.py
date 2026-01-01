@@ -114,7 +114,7 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "  vco import <review_id>   Import specified video\n"
         "  vco import --all         Import all pending videos\n"
         "  vco import --remove <id> Remove specified ID from queue\n"
-        "  vco import --clear       Clear entire review queue\n\n"
+        "  vco import --clear       Clear both local and AWS queues\n\n"
         "After import, manually delete original videos in Photos app.",
     },
     "import.list": {
@@ -126,8 +126,8 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "en": "Import all pending videos at once",
     },
     "import.clear": {
-        "ja": "レビューキューを全てクリア",
-        "en": "Clear entire review queue",
+        "ja": "ローカルとAWS両方のキューを全てクリア",
+        "en": "Clear both local and AWS queues entirely",
     },
     "import.remove": {
         "ja": "指定したIDをレビューキューから削除",

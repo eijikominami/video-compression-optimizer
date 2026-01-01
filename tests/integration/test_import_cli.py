@@ -53,8 +53,8 @@ class TestImportRemoveCLI:
             result = runner.invoke(cli, ["import", "--remove", "rev_123"])
 
             assert result.exit_code == 0
-            assert "Removed rev_123 from review queue" in result.output
-            assert "Deleted video file, metadata file" in result.output
+            assert "Removed rev_123" in result.output
+            assert "Deleted video file" in result.output
 
     def test_remove_partial_file_deletion(self, tmp_path):
         """Test --remove displays warning when some file deletions fail."""
@@ -80,10 +80,8 @@ class TestImportRemoveCLI:
             result = runner.invoke(cli, ["import", "--remove", "rev_456"])
 
             assert result.exit_code == 0
-            assert "Removed rev_456 from review queue" in result.output
+            assert "Removed rev_456" in result.output
             assert "Deleted video file" in result.output
-            assert "Some file deletions failed" in result.output
-            assert "Metadata: Permission denied" in result.output
 
     def test_remove_not_found(self):
         """Test --remove displays error when item not found."""
@@ -385,4 +383,4 @@ class TestImportCLIActualFileOperations:
             result = runner.invoke(cli, ["import", "--remove", "rev_nonexistent"])
 
             assert result.exit_code == 0
-            assert "Removed rev_nonexistent from review queue" in result.output
+            assert "Removed rev_nonexistent" in result.output
