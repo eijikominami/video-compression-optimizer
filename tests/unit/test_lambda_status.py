@@ -656,7 +656,15 @@ class TestResponseSchemaConstants:
 
     def test_valid_file_statuses_defined(self):
         """VALID_FILE_STATUSES contains all expected statuses."""
-        expected = ["PENDING", "CONVERTING", "VERIFYING", "COMPLETED", "FAILED"]
+        expected = [
+            "PENDING",
+            "CONVERTING",
+            "VERIFYING",
+            "COMPLETED",
+            "DOWNLOADED",
+            "REMOVED",
+            "FAILED",
+        ]
         assert status_app.VALID_FILE_STATUSES == expected
 
     def test_valid_current_steps_defined(self):
@@ -678,8 +686,8 @@ class TestResponseSchemaConstants:
         assert "status" in status_app.FILE_REQUIRED_FIELDS
 
 
-class TestDownloadStatusEndpoint:
-    """Tests for download-status endpoint (Requirement 8.3)."""
+class TestUpdateFileStatusToDownloaded:
+    """Tests for update_file_status_to_downloaded function (used by cleanup_file)."""
 
     @pytest.fixture(autouse=True)
     def setup_env(self, monkeypatch):
@@ -689,8 +697,8 @@ class TestDownloadStatusEndpoint:
 
     @patch.object(status_app, "get_task")
     @patch.object(status_app, "get_dynamodb_table")
-    def test_update_download_status_completed(self, mock_dynamodb, mock_get_task):
-        """Update download status to completed."""
+    def test_update_file_status_to_downloaded(self, mock_dynamodb, mock_get_task):
+        """Update file status to DOWNLOADED after successful download."""
         mock_get_task.return_value = {
             "task_id": "task-123",
             "user_id": "user-123",
@@ -701,46 +709,26 @@ class TestDownloadStatusEndpoint:
         mock_table = MagicMock()
         mock_dynamodb.return_value = mock_table
 
-        result = status_app.update_download_status("task-123", "file-1", "completed", "user-123")
+        result = status_app.update_file_status_to_downloaded("task-123", "file-1", "user-123")
 
         assert result is not None
         assert result["file_id"] == "file-1"
+        assert result["status"] == "DOWNLOADED"
         assert result["downloaded_at"] is not None
         mock_table.update_item.assert_called_once()
 
     @patch.object(status_app, "get_task")
-    @patch.object(status_app, "get_dynamodb_table")
-    def test_update_download_status_started(self, mock_dynamodb, mock_get_task):
-        """Update download status to started."""
-        mock_get_task.return_value = {
-            "task_id": "task-123",
-            "user_id": "user-123",
-            "files": [
-                {"file_id": "file-1", "filename": "video.mov", "status": "COMPLETED"},
-            ],
-        }
-        mock_table = MagicMock()
-        mock_dynamodb.return_value = mock_table
-
-        result = status_app.update_download_status("task-123", "file-1", "started", "user-123")
-
-        assert result is not None
-        assert result["file_id"] == "file-1"
-        assert result["downloaded_at"] is None  # Not set for started
-        mock_table.update_item.assert_called_once()
-
-    @patch.object(status_app, "get_task")
-    def test_update_download_status_task_not_found(self, mock_get_task):
-        """Update download status fails when task not found."""
+    def test_update_file_status_to_downloaded_task_not_found(self, mock_get_task):
+        """Update file status fails when task not found."""
         mock_get_task.return_value = None
 
-        result = status_app.update_download_status("nonexistent", "file-1", "completed", "user-123")
+        result = status_app.update_file_status_to_downloaded("nonexistent", "file-1", "user-123")
 
         assert result is None
 
     @patch.object(status_app, "get_task")
-    def test_update_download_status_file_not_found(self, mock_get_task):
-        """Update download status fails when file not found."""
+    def test_update_file_status_to_downloaded_file_not_found(self, mock_get_task):
+        """Update file status fails when file not found."""
         mock_get_task.return_value = {
             "task_id": "task-123",
             "user_id": "user-123",
@@ -749,105 +737,22 @@ class TestDownloadStatusEndpoint:
             ],
         }
 
-        result = status_app.update_download_status(
-            "task-123", "nonexistent-file", "completed", "user-123"
+        result = status_app.update_file_status_to_downloaded(
+            "task-123", "nonexistent-file", "user-123"
         )
 
         assert result is None
 
-    @patch.object(status_app, "get_task")
-    def test_update_download_status_invalid_action(self, mock_get_task):
-        """Update download status fails with invalid action."""
-        mock_get_task.return_value = {
-            "task_id": "task-123",
-            "user_id": "user-123",
-            "files": [
-                {"file_id": "file-1", "filename": "video.mov", "status": "COMPLETED"},
-            ],
-        }
-
-        result = status_app.update_download_status("task-123", "file-1", "invalid", "user-123")
-
-        assert result is None
-
-    @patch.object(status_app, "update_download_status")
-    def test_handler_download_status_endpoint(self, mock_update):
-        """Handler processes download-status endpoint."""
-        mock_update.return_value = {
-            "file_id": "file-1",
-            "downloaded_at": "2024-01-01T00:00:00Z",
-        }
-
-        event = {
-            "headers": {"X-User-Id": "user-123"},
-            "httpMethod": "POST",
-            "resource": "/tasks/{task_id}/download-status",
-            "pathParameters": {"task_id": "task-123"},
-            "body": json.dumps({"file_id": "file-1", "action": "completed"}),
-        }
-
-        response = status_app.lambda_handler(event, None)
-
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-        assert body["file_id"] == "file-1"
-        assert body["downloaded_at"] is not None
-
-    def test_handler_download_status_missing_file_id(self):
-        """Handler returns 400 when file_id is missing."""
-        event = {
-            "headers": {"X-User-Id": "user-123"},
-            "httpMethod": "POST",
-            "resource": "/tasks/{task_id}/download-status",
-            "pathParameters": {"task_id": "task-123"},
-            "body": json.dumps({"action": "completed"}),
-        }
-
-        response = status_app.lambda_handler(event, None)
-
-        assert response["statusCode"] == 400
-        body = json.loads(response["body"])
-        assert "file_id" in body["error"]
-
-    def test_handler_download_status_invalid_action(self):
-        """Handler returns 400 when action is invalid."""
-        event = {
-            "headers": {"X-User-Id": "user-123"},
-            "httpMethod": "POST",
-            "resource": "/tasks/{task_id}/download-status",
-            "pathParameters": {"task_id": "task-123"},
-            "body": json.dumps({"file_id": "file-1", "action": "invalid"}),
-        }
-
-        response = status_app.lambda_handler(event, None)
-
-        assert response["statusCode"] == 400
-        body = json.loads(response["body"])
-        assert "action" in body["error"].lower()
-
-    @patch.object(status_app, "update_download_status")
-    def test_handler_download_status_not_found(self, mock_update):
-        """Handler returns 404 when task/file not found."""
-        mock_update.return_value = None
-
-        event = {
-            "headers": {"X-User-Id": "user-123"},
-            "httpMethod": "POST",
-            "resource": "/tasks/{task_id}/download-status",
-            "pathParameters": {"task_id": "task-123"},
-            "body": json.dumps({"file_id": "file-1", "action": "completed"}),
-        }
-
-        response = status_app.lambda_handler(event, None)
-
-        assert response["statusCode"] == 404
-
 
 class TestDownloadStatusInResponse:
-    """Tests for download status fields in API response (Requirement 8.4)."""
+    """Tests for download status fields in API response (Requirement 8.4).
 
-    def test_format_task_response_includes_download_fields(self):
-        """format_task_response includes downloaded_at and download_available."""
+    Note: download_status field was removed. File status is now tracked via
+    FileStatus enum (COMPLETED -> DOWNLOADED transition).
+    """
+
+    def test_format_task_response_includes_download_available(self):
+        """format_task_response includes download_available field."""
         task = {
             "task_id": "task-123",
             "status": "COMPLETED",
@@ -857,7 +762,6 @@ class TestDownloadStatusInResponse:
                     "file_id": "file-1",
                     "filename": "video.mov",
                     "status": "COMPLETED",
-                    "downloaded_at": "2024-01-01T12:00:00Z",
                     "download_available": True,
                 }
             ],
@@ -869,7 +773,6 @@ class TestDownloadStatusInResponse:
 
         assert "files" in response
         assert len(response["files"]) == 1
-        assert response["files"][0]["downloaded_at"] == "2024-01-01T12:00:00Z"
         assert response["files"][0]["download_available"] is True
 
     def test_format_task_response_download_available_defaults_true(self):
@@ -883,7 +786,7 @@ class TestDownloadStatusInResponse:
                     "file_id": "file-1",
                     "filename": "video.mov",
                     "status": "COMPLETED",
-                    # No downloaded_at or download_available
+                    # No download_available
                 }
             ],
             "created_at": "2024-01-01T00:00:00Z",
@@ -892,7 +795,6 @@ class TestDownloadStatusInResponse:
 
         response = status_app.format_task_response(task)
 
-        assert response["files"][0]["downloaded_at"] is None
         assert response["files"][0]["download_available"] is True
 
     def test_format_task_response_download_available_false(self):
@@ -906,7 +808,6 @@ class TestDownloadStatusInResponse:
                     "file_id": "file-1",
                     "filename": "video.mov",
                     "status": "COMPLETED",
-                    "downloaded_at": "2024-01-01T12:00:00Z",
                     "download_available": False,  # File expired from S3
                 }
             ],
@@ -917,3 +818,319 @@ class TestDownloadStatusInResponse:
         response = status_app.format_task_response(task)
 
         assert response["files"][0]["download_available"] is False
+
+    def test_format_task_response_downloaded_status(self):
+        """Files with DOWNLOADED status are properly formatted."""
+        task = {
+            "task_id": "task-123",
+            "status": "COMPLETED",
+            "quality_preset": "balanced",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video.mov",
+                    "status": "DOWNLOADED",  # Already downloaded
+                    "downloaded_at": "2024-01-01T12:00:00Z",
+                }
+            ],
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
+
+        response = status_app.format_task_response(task)
+
+        assert response["files"][0]["status"] == "DOWNLOADED"
+
+
+class TestCleanupFileEndpoint:
+    """Tests for cleanup file endpoint (Requirement 10.1-10.5)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_env(self, monkeypatch):
+        """Set up environment variables."""
+        monkeypatch.setenv("DYNAMODB_TABLE", "test-table")
+        monkeypatch.setenv("S3_BUCKET", "test-bucket")
+        # Also patch the module-level variable
+        monkeypatch.setattr(status_app, "S3_BUCKET", "test-bucket")
+
+    @patch.object(status_app, "get_task")
+    @patch.object(status_app, "get_dynamodb_table")
+    @patch.object(status_app, "get_s3_client")
+    def test_cleanup_file_downloaded_success(self, mock_s3, mock_dynamodb, mock_get_task):
+        """Cleanup file with action=downloaded updates status and deletes S3."""
+        mock_get_task.return_value = {
+            "task_id": "task-123",
+            "user_id": "user-123",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video.mov",
+                    "status": "COMPLETED",
+                    "output_s3_key": "output/task-123/file-1/converted.mp4",
+                },
+            ],
+        }
+        mock_table = MagicMock()
+        mock_dynamodb.return_value = mock_table
+        mock_s3_client = MagicMock()
+        mock_s3.return_value = mock_s3_client
+
+        result = status_app.cleanup_file("task-123", "file-1", "user-123", "downloaded")
+
+        assert result["file_id"] == "file-1"
+        assert result["status"] == "DOWNLOADED"
+        assert result["s3_deleted"] is True
+        assert result["completed_at"] is not None
+        mock_table.update_item.assert_called_once()
+        mock_s3_client.delete_object.assert_called_once_with(
+            Bucket="test-bucket", Key="output/task-123/file-1/converted.mp4"
+        )
+
+    @patch.object(status_app, "get_task")
+    @patch.object(status_app, "get_dynamodb_table")
+    @patch.object(status_app, "get_s3_client")
+    def test_cleanup_file_removed_success(self, mock_s3, mock_dynamodb, mock_get_task):
+        """Cleanup file with action=removed updates status to REMOVED."""
+        mock_get_task.return_value = {
+            "task_id": "task-123",
+            "user_id": "user-123",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video.mov",
+                    "status": "COMPLETED",
+                    "output_s3_key": "output/task-123/file-1/converted.mp4",
+                },
+            ],
+        }
+        mock_table = MagicMock()
+        mock_dynamodb.return_value = mock_table
+        mock_s3_client = MagicMock()
+        mock_s3.return_value = mock_s3_client
+
+        result = status_app.cleanup_file("task-123", "file-1", "user-123", "removed")
+
+        assert result["file_id"] == "file-1"
+        assert result["status"] == "REMOVED"
+        assert result["s3_deleted"] is True
+
+    @patch.object(status_app, "get_task")
+    def test_cleanup_file_task_not_found(self, mock_get_task):
+        """Cleanup file raises ValueError when task not found."""
+        mock_get_task.return_value = None
+
+        with pytest.raises(ValueError, match="Task not found"):
+            status_app.cleanup_file("nonexistent", "file-1", "user-123", "downloaded")
+
+    @patch.object(status_app, "get_task")
+    def test_cleanup_file_file_not_found(self, mock_get_task):
+        """Cleanup file raises ValueError when file not found."""
+        mock_get_task.return_value = {
+            "task_id": "task-123",
+            "user_id": "user-123",
+            "files": [
+                {"file_id": "file-1", "filename": "video.mov", "status": "COMPLETED"},
+            ],
+        }
+
+        with pytest.raises(ValueError, match="File not found"):
+            status_app.cleanup_file("task-123", "nonexistent-file", "user-123", "downloaded")
+
+    def test_cleanup_file_invalid_action(self):
+        """Cleanup file raises ValueError for invalid action."""
+        with pytest.raises(ValueError, match="Invalid action"):
+            status_app.cleanup_file("task-123", "file-1", "user-123", "invalid")
+
+    @patch.object(status_app, "get_task")
+    @patch.object(status_app, "get_dynamodb_table")
+    @patch.object(status_app, "get_s3_client")
+    def test_cleanup_file_s3_delete_failure_returns_success(
+        self, mock_s3, mock_dynamodb, mock_get_task
+    ):
+        """S3 deletion failure still returns success (status is source of truth)."""
+        from botocore.exceptions import ClientError
+
+        mock_get_task.return_value = {
+            "task_id": "task-123",
+            "user_id": "user-123",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video.mov",
+                    "status": "COMPLETED",
+                    "output_s3_key": "output/task-123/file-1/converted.mp4",
+                },
+            ],
+        }
+        mock_table = MagicMock()
+        mock_dynamodb.return_value = mock_table
+        mock_s3_client = MagicMock()
+        mock_s3_client.delete_object.side_effect = ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject"
+        )
+        mock_s3.return_value = mock_s3_client
+
+        result = status_app.cleanup_file("task-123", "file-1", "user-123", "downloaded")
+
+        # Should still succeed, but s3_deleted is False
+        assert result["file_id"] == "file-1"
+        assert result["status"] == "DOWNLOADED"
+        assert result["s3_deleted"] is False
+
+    @patch.object(status_app, "get_task")
+    @patch.object(status_app, "get_dynamodb_table")
+    def test_cleanup_file_status_update_failure_raises_error(self, mock_dynamodb, mock_get_task):
+        """Status update failure raises RuntimeError (S3 deletion skipped)."""
+        from botocore.exceptions import ClientError
+
+        mock_get_task.return_value = {
+            "task_id": "task-123",
+            "user_id": "user-123",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video.mov",
+                    "status": "COMPLETED",
+                    "output_s3_key": "output/task-123/file-1/converted.mp4",
+                },
+            ],
+        }
+        mock_table = MagicMock()
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ValidationException", "Message": "Error"}}, "UpdateItem"
+        )
+        mock_dynamodb.return_value = mock_table
+
+        with pytest.raises(RuntimeError, match="Failed to update file status"):
+            status_app.cleanup_file("task-123", "file-1", "user-123", "downloaded")
+
+    @patch.object(status_app, "get_task")
+    @patch.object(status_app, "get_dynamodb_table")
+    def test_cleanup_file_no_s3_key(self, mock_dynamodb, mock_get_task):
+        """Cleanup file handles missing S3 key gracefully."""
+        mock_get_task.return_value = {
+            "task_id": "task-123",
+            "user_id": "user-123",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video.mov",
+                    "status": "COMPLETED",
+                    # No output_s3_key
+                },
+            ],
+        }
+        mock_table = MagicMock()
+        mock_dynamodb.return_value = mock_table
+
+        result = status_app.cleanup_file("task-123", "file-1", "user-123", "downloaded")
+
+        assert result["file_id"] == "file-1"
+        assert result["status"] == "DOWNLOADED"
+        assert result["s3_deleted"] is False
+
+    @patch.object(status_app, "cleanup_file")
+    def test_handler_cleanup_endpoint_success(self, mock_cleanup):
+        """Handler processes cleanup endpoint successfully."""
+        mock_cleanup.return_value = {
+            "file_id": "file-1",
+            "status": "DOWNLOADED",
+            "s3_deleted": True,
+            "completed_at": "2024-01-01T00:00:00Z",
+        }
+
+        event = {
+            "headers": {"X-User-Id": "user-123"},
+            "httpMethod": "POST",
+            "resource": "/tasks/{task_id}/files/{file_id}/cleanup",
+            "pathParameters": {"task_id": "task-123", "file_id": "file-1"},
+            "body": json.dumps({"action": "downloaded"}),
+        }
+
+        response = status_app.lambda_handler(event, None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["file_id"] == "file-1"
+        assert body["status"] == "DOWNLOADED"
+        assert body["s3_deleted"] is True
+
+    def test_handler_cleanup_missing_action(self):
+        """Handler returns 400 when action is missing."""
+        event = {
+            "headers": {"X-User-Id": "user-123"},
+            "httpMethod": "POST",
+            "resource": "/tasks/{task_id}/files/{file_id}/cleanup",
+            "pathParameters": {"task_id": "task-123", "file_id": "file-1"},
+            "body": json.dumps({}),
+        }
+
+        response = status_app.lambda_handler(event, None)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "action" in body["error"]
+
+    def test_handler_cleanup_invalid_action(self):
+        """Handler returns 400 for invalid action."""
+        event = {
+            "headers": {"X-User-Id": "user-123"},
+            "httpMethod": "POST",
+            "resource": "/tasks/{task_id}/files/{file_id}/cleanup",
+            "pathParameters": {"task_id": "task-123", "file_id": "file-1"},
+            "body": json.dumps({"action": "invalid"}),
+        }
+
+        response = status_app.lambda_handler(event, None)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "Invalid action" in body["error"]
+
+    @patch.object(status_app, "cleanup_file")
+    def test_handler_cleanup_not_found(self, mock_cleanup):
+        """Handler returns 404 when task/file not found."""
+        mock_cleanup.side_effect = ValueError("Task not found")
+
+        event = {
+            "headers": {"X-User-Id": "user-123"},
+            "httpMethod": "POST",
+            "resource": "/tasks/{task_id}/files/{file_id}/cleanup",
+            "pathParameters": {"task_id": "task-123", "file_id": "file-1"},
+            "body": json.dumps({"action": "downloaded"}),
+        }
+
+        response = status_app.lambda_handler(event, None)
+
+        assert response["statusCode"] == 404
+
+    @patch.object(status_app, "cleanup_file")
+    def test_handler_cleanup_status_update_error(self, mock_cleanup):
+        """Handler returns 500 when status update fails."""
+        mock_cleanup.side_effect = RuntimeError("Failed to update file status")
+
+        event = {
+            "headers": {"X-User-Id": "user-123"},
+            "httpMethod": "POST",
+            "resource": "/tasks/{task_id}/files/{file_id}/cleanup",
+            "pathParameters": {"task_id": "task-123", "file_id": "file-1"},
+            "body": json.dumps({"action": "downloaded"}),
+        }
+
+        response = status_app.lambda_handler(event, None)
+
+        assert response["statusCode"] == 500
+
+
+class TestValidFileStatusesIncludesRemoved:
+    """Test that VALID_FILE_STATUSES includes REMOVED status."""
+
+    def test_removed_status_is_valid(self):
+        """REMOVED is a valid file status."""
+        assert "REMOVED" in status_app.VALID_FILE_STATUSES
+
+    def test_validate_file_response_removed_status(self):
+        """File with REMOVED status passes validation."""
+        file = {"file_id": "file-1", "filename": "video.mov", "status": "REMOVED"}
+        is_valid, error = status_app.validate_file_response(file, 0)
+        assert is_valid is True

@@ -17,7 +17,12 @@ class TestQualityCheckerParameterConsistency:
     def test_async_workflow_passes_metadata_s3_key(self):
         """Step Functions must pass metadata_s3_key to quality-checker."""
         # Load Step Functions definition
-        asl_path = Path(__file__).parent.parent.parent / "sam-app" / "statemachine" / "async-workflow.asl.json"
+        asl_path = (
+            Path(__file__).parent.parent.parent
+            / "sam-app"
+            / "statemachine"
+            / "async-workflow.asl.json"
+        )
 
         with open(asl_path) as f:
             asl = json.load(f)
@@ -28,8 +33,12 @@ class TestQualityCheckerParameterConsistency:
 
         # Verify required parameters are present
         assert "job_id.$" in params, "Missing job_id parameter"
-        assert "original_s3_key.$" in params or "original_s3_key" in params, "Missing original_s3_key parameter"
-        assert "converted_s3_key.$" in params or "converted_s3_key" in params, "Missing converted_s3_key parameter"
+        assert "original_s3_key.$" in params or "original_s3_key" in params, (
+            "Missing original_s3_key parameter"
+        )
+        assert "converted_s3_key.$" in params or "converted_s3_key" in params, (
+            "Missing converted_s3_key parameter"
+        )
         assert "metadata_s3_key.$" in params or "metadata_s3_key" in params, (
             "Missing metadata_s3_key parameter - capture date will not be embedded!"
         )
@@ -59,14 +68,17 @@ class TestQualityCheckerParameterConsistency:
         from vco.models.async_task import AsyncFile
 
         field_names = [f.name for f in dataclasses.fields(AsyncFile)]
-        assert "metadata_s3_key" in field_names, (
-            "AsyncFile model missing metadata_s3_key field"
-        )
+        assert "metadata_s3_key" in field_names, "AsyncFile model missing metadata_s3_key field"
 
     def test_parameter_mapping_consistency(self):
         """Verify parameter names are consistent between sync and async."""
         # Load Step Functions definition
-        asl_path = Path(__file__).parent.parent.parent / "sam-app" / "statemachine" / "async-workflow.asl.json"
+        asl_path = (
+            Path(__file__).parent.parent.parent
+            / "sam-app"
+            / "statemachine"
+            / "async-workflow.asl.json"
+        )
 
         with open(asl_path) as f:
             asl = json.load(f)

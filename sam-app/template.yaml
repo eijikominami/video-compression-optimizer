@@ -316,7 +316,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'vco-async-task-status-${Environment}'
-      Description: Handles async task status queries
+      Description: Handles async task status queries and file cleanup
       CodeUri: async-task-status/
       Handler: app.lambda_handler
       Runtime: python3.11
@@ -329,9 +329,9 @@ Resources:
           DYNAMODB_TABLE: !Ref AsyncTasksTable
           S3_BUCKET: !Ref VideoStorageBucket
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref AsyncTasksTable
-        - S3ReadPolicy:
+        - S3CrudPolicy:
             BucketName: !Ref VideoStorageBucket
         - Statement:
             - Effect: Allow
@@ -352,6 +352,12 @@ Resources:
             RestApiId: !Ref AsyncWorkflowApi
             Path: /tasks/{task_id}
             Method: GET
+        CleanupFile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AsyncWorkflowApi
+            Path: /tasks/{task_id}/files/{file_id}/cleanup
+            Method: POST
       Tags:
         Application: VideoCompressionOptimizer
         Environment: !Ref Environment

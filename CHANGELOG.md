@@ -9,13 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`vco import` コマンドの AWS 統合**
+  - ローカルと AWS 両方の変換済み動画を統合的にインポート
+  - `vco import --list` - ローカル + AWS の一覧表示（Source 列付き）
+  - `vco import <task-id:file-id>` - AWS アイテムの単一インポート
+  - `vco import --all` - ローカル + AWS の一括インポート（AWS は並列ダウンロード）
+  - `vco import --remove <task-id:file-id>` - AWS アイテムの削除（S3 ファイル削除）
+  - AWS 利用不可時はローカルのみ表示（警告メッセージ付き）
+
 - **非同期変換ワークフロー（`vco convert --async`）**
   - AWS Step Functions による非同期変換処理
   - `vco status` - タスク状態の確認
   - `vco status <task-id>` - タスク詳細の表示
   - `vco cancel <task-id>` - 実行中タスクのキャンセル
-  - `vco download <task-id>` - 完了ファイルのダウンロード
-  - 再開可能なダウンロード（`--resume`）
+  - 再開可能なダウンロード
   - 部分完了時の成功ファイルダウンロード
 
 - **デフォルト変換モード設定**
@@ -46,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - balanced で変換後、SSIM が閾値を下回った場合に自動的に high でリトライ
   - 品質を確保しつつ、可能な限り圧縮率を高める
   - `vco convert --quality balanced+` で使用
+
+### Deprecated
+
+- **`vco download` コマンド**
+  - `vco import` に統合されました
+  - 引き続き使用可能ですが、廃止予定の警告が表示されます
 
 ### Removed
 

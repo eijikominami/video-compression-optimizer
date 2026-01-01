@@ -19,6 +19,9 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
+# API Request Schema Constants
+VALID_QUALITY_PRESETS = ["balanced", "high", "compression", "balanced+", "high+"]
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -130,35 +133,42 @@ def update_task_execution_arn(task_id: str, execution_arn: str) -> None:
     )
 
 
-def validate_request(body: dict) -> tuple[bool, str | None]:
-    """Validate request body."""
+def validate_request(body: dict) -> tuple[bool, str | None, str | None]:
+    """Validate request body.
+
+    Returns:
+        Tuple of (is_valid, error_message, error_code)
+    """
     required_fields = ["user_id", "files"]
 
     for field in required_fields:
         if field not in body:
-            return False, f"Missing required field: {field}"
+            return False, f"Missing required field: {field}", "MISSING_FIELD"
 
     files = body.get("files", [])
     if not files:
-        return False, "At least one file is required"
+        return False, "At least one file is required", "EMPTY_FILES"
 
     if not isinstance(files, list):
-        return False, "files must be a list"
+        return False, "files must be a list", "INVALID_FILES"
 
     for i, file in enumerate(files):
         if not isinstance(file, dict):
-            return False, f"files[{i}] must be an object"
+            return False, f"files[{i}] must be an object", "INVALID_FILE"
         if "filename" not in file:
-            return False, f"files[{i}] missing filename"
+            return False, f"files[{i}] missing filename", "MISSING_FILENAME"
         if "original_uuid" not in file:
-            return False, f"files[{i}] missing original_uuid"
+            return False, f"files[{i}] missing original_uuid", "MISSING_UUID"
 
     quality_preset = body.get("quality_preset", "balanced")
-    valid_presets = ["balanced", "high", "balanced+", "high+"]
-    if quality_preset not in valid_presets:
-        return False, f"Invalid quality_preset. Must be one of: {valid_presets}"
+    if quality_preset not in VALID_QUALITY_PRESETS:
+        return (
+            False,
+            f"Invalid quality_preset. Must be one of: {VALID_QUALITY_PRESETS}",
+            "INVALID_PRESET",
+        )
 
-    return True, None
+    return True, None, None
 
 
 def lambda_handler(event: dict, context: Any) -> dict:
@@ -202,7 +212,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
             body = event.get("body", event)
 
         # Validate request
-        is_valid, error_message = validate_request(body)
+        is_valid, error_message, _error_code = validate_request(body)
         if not is_valid:
             return {
                 "statusCode": 400,
@@ -235,6 +245,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 input_file.get("source_s3_key") or f"input/{task_id}/{file_id}/{filename}"
             )
 
+            # Use metadata_s3_key from request if provided (CLI pre-uploads files)
+            metadata_s3_key = input_file.get("metadata_s3_key")
+
             file_record = {
                 "file_id": file_id,
                 "original_uuid": original_uuid,
@@ -244,6 +257,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 "retry_count": 0,
                 "preset_attempts": [],
             }
+            # Add metadata_s3_key if provided
+            if metadata_s3_key:
+                file_record["metadata_s3_key"] = metadata_s3_key
+
             files.append(file_record)
 
             # Generate presigned URL for upload

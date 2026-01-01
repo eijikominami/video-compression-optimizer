@@ -146,7 +146,7 @@ class StatusCommand:
             return tasks
 
         except Exception as e:
-            logger.exception("Failed to list tasks")
+            logger.warning(f"Failed to list tasks: {e}")
             raise RuntimeError(f"Failed to list tasks: {e}") from e
 
     def get_task_detail(self, task_id: str, user_id: str | None = None) -> TaskDetail:
@@ -229,8 +229,17 @@ class StatusCommand:
             )
 
         except Exception as e:
-            logger.exception(f"Failed to get task detail for {task_id}")
-            raise RuntimeError(f"Failed to get task detail: {e}") from e
+            # Extract user-friendly message
+            error_msg = str(e)
+            if "404" in error_msg:
+                error_msg = f"Task not found: {task_id}"
+            elif "403" in error_msg or "Forbidden" in error_msg:
+                error_msg = "Access denied. Check your AWS credentials."
+            elif "ExpiredToken" in error_msg:
+                error_msg = "AWS credentials have expired. Please refresh your credentials."
+
+            logger.warning(f"Failed to get task detail for {task_id}: {error_msg}")
+            raise RuntimeError(f"Failed to get task detail: {error_msg}") from e
 
     def _call_api(
         self,
@@ -288,6 +297,40 @@ class StatusCommand:
         response.raise_for_status()
 
         return response.json()
+
+    def update_file_status_to_downloaded(
+        self,
+        task_id: str,
+        file_id: str,
+        user_id: str | None = None,
+    ) -> bool:
+        """Update file status to DOWNLOADED after successful download.
+
+        Args:
+            task_id: Task ID
+            file_id: File ID
+            user_id: User identifier (defaults to machine ID)
+
+        Returns:
+            True if update succeeded, False otherwise
+
+        Requirements: 4.4
+        """
+        if user_id is None:
+            user_id = self._get_machine_id()
+
+        try:
+            self._call_api(
+                method="POST",
+                path=f"/tasks/{task_id}/download-status",
+                params={"user_id": user_id},
+                body={"file_id": file_id},
+            )
+            logger.info(f"Updated file status to DOWNLOADED: {task_id}:{file_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to update file status for {task_id}:{file_id}: {e}")
+            return False
 
     def _get_machine_id(self) -> str:
         """Get machine identifier for user_id.

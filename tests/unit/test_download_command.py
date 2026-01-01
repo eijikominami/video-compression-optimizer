@@ -591,7 +591,7 @@ class TestS3FileRetention:
             assert result.downloaded_files >= 0
 
     def test_download_status_updated_after_download(self, tmp_path):
-        """Test that download status is updated in DynamoDB after successful download."""
+        """Test that file status is updated to DOWNLOADED after successful download."""
         with patch("boto3.Session") as mock_session:
             mock_s3 = MagicMock()
             mock_s3.head_object.return_value = {
@@ -627,7 +627,7 @@ class TestS3FileRetention:
 
             cmd.download("task-1")
 
-            # Verify download status was updated
+            # Verify file status was updated to DOWNLOADED
             cmd._update_download_status.assert_called_once_with("task-1", "file-1", "completed")
 
     def test_delete_s3_file_method_still_works(self, tmp_path):

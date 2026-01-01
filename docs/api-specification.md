@@ -6,7 +6,7 @@ Video Compression Optimizer (VCO) provides a REST API for asynchronous video con
 
 **Base URL**: `https://{api-gateway-id}.execute-api.ap-northeast-1.amazonaws.com/Prod`
 
-**API Version**: 1.0
+**API Version**: 1.2
 
 **Authentication**: AWS Signature Version 4
 
@@ -17,7 +17,7 @@ openapi: 3.0.3
 info:
   title: Video Compression Optimizer API
   description: REST API for asynchronous video conversion
-  version: 1.0.0
+  version: 1.2.0
   contact:
     name: VCO Support
     url: https://github.com/eijikominami/video-compression-optimizer
@@ -133,11 +133,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /tasks/{task_id}/download-status:
+  /tasks/{task_id}/files/{file_id}/cleanup:
     post:
-      summary: Update download status
-      description: Mark files as downloaded and update DynamoDB
-      operationId: updateDownloadStatus
+      summary: Cleanup file after import or removal
+      description: |
+        Atomically update file status and delete S3 file. Used after successful import
+        (action=downloaded) or when removing/clearing AWS items (action=removed).
+        
+        Processing order:
+        1. Update DynamoDB status (DOWNLOADED or REMOVED)
+        2. Delete S3 file
+        
+        If status update fails, S3 deletion is skipped and error is returned.
+        If S3 deletion fails, warning is logged but success is returned (status is authoritative).
+      operationId: cleanupFile
       parameters:
         - name: task_id
           in: path
@@ -146,19 +155,32 @@ paths:
             type: string
             format: uuid
           description: Task ID
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^f[0-9]+$'
+          description: File ID
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DownloadStatusRequest'
+              $ref: '#/components/schemas/CleanupRequest'
       responses:
         '200':
-          description: Download status updated successfully
+          description: File cleanup completed successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DownloadStatusResponse'
+                $ref: '#/components/schemas/CleanupResponse'
+        '400':
+          description: Invalid action parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Task or file not found
           content:
@@ -215,7 +237,7 @@ components:
         filename:
           type: string
           maxLength: 255
-          pattern: '^[^/\\\\:*?"<>|]+\.(mp4|mov|avi|mkv|m4v)$'
+          pattern: '^[^/\\:*?"<>|]+\.(mp4|mov|avi|mkv|m4v)$'
           description: Original filename with extension
         file_size:
           type: integer
@@ -333,9 +355,8 @@ components:
           - file_id: "f1"
             filename: "video1.mp4"
             status: "COMPLETED"
+            conversion_progress_percentage: 100
             output_s3_key: "output/task123/f1/video1_h265.mp4"
-            downloaded_at: null
-            download_available: true
         created_at: "2024-01-01T10:00:00Z"
         updated_at: "2024-01-01T10:30:00Z"
 
@@ -345,8 +366,7 @@ components:
         - file_id
         - filename
         - status
-        - downloaded_at
-        - download_available
+        - conversion_progress_percentage
       properties:
         file_id:
           type: string
@@ -357,20 +377,25 @@ components:
           description: Original filename
         status:
           type: string
-          enum: [PENDING, CONVERTING, VERIFYING, COMPLETED, FAILED]
-          description: File processing status
+          enum: [PENDING, CONVERTING, VERIFYING, COMPLETED, DOWNLOADED, REMOVED, FAILED]
+          description: |
+            File processing status:
+            - PENDING: Waiting to start
+            - CONVERTING: MediaConvert job running
+            - VERIFYING: SSIM quality check running
+            - COMPLETED: Successfully processed, available for download
+            - DOWNLOADED: File has been downloaded by user
+            - REMOVED: File has been removed by user
+            - FAILED: Processing failed
+        conversion_progress_percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Individual file conversion progress (0=PENDING, 0-30=CONVERTING, 65=VERIFYING, 100=COMPLETED/DOWNLOADED/REMOVED/FAILED)
         output_s3_key:
           type: string
           nullable: true
           description: S3 key for converted file (null if not completed)
-        downloaded_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: Download completion time (null if not downloaded)
-        download_available:
-          type: boolean
-          description: Whether file is available for download
         error_message:
           type: string
           nullable: true
@@ -379,9 +404,8 @@ components:
         file_id: "f1"
         filename: "video1.mp4"
         status: "COMPLETED"
+        conversion_progress_percentage: 100
         output_s3_key: "output/task123/f1/video1_h265.mp4"
-        downloaded_at: null
-        download_available: true
         error_message: null
 
     TaskCancelResponse:
@@ -407,34 +431,49 @@ components:
         status: "CANCELLED"
         message: "Task cancelled successfully"
 
-    DownloadStatusRequest:
+    CleanupRequest:
       type: object
       required:
-        - file_ids
+        - action
       properties:
-        file_ids:
-          type: array
-          items:
-            type: string
-            pattern: '^f[0-9]+$'
-          minItems: 1
-          description: List of file IDs to mark as downloaded
+        action:
+          type: string
+          enum: [downloaded, removed]
+          description: |
+            Cleanup action:
+            - downloaded: File was successfully imported (status → DOWNLOADED)
+            - removed: File was removed/cleared by user (status → REMOVED)
       example:
-        file_ids: ["f1", "f2"]
+        action: "downloaded"
 
-    DownloadStatusResponse:
+    CleanupResponse:
       type: object
       required:
-        - updated_files
+        - file_id
+        - status
+        - s3_deleted
+        - cleaned_at
       properties:
-        updated_files:
-          type: array
-          items:
-            type: string
-            pattern: '^f[0-9]+$'
-          description: List of successfully updated file IDs
+        file_id:
+          type: string
+          pattern: '^f[0-9]+$'
+          description: Cleaned up file ID
+        status:
+          type: string
+          enum: [DOWNLOADED, REMOVED]
+          description: Updated file status
+        s3_deleted:
+          type: boolean
+          description: Whether S3 file was successfully deleted
+        cleaned_at:
+          type: string
+          format: date-time
+          description: Cleanup completion time (ISO 8601)
       example:
-        updated_files: ["f1", "f2"]
+        file_id: "f1"
+        status: "DOWNLOADED"
+        s3_deleted: true
+        cleaned_at: "2024-01-01T12:00:00Z"
 
     ErrorResponse:
       type: object
@@ -467,6 +506,7 @@ components:
 | `INVALID_FILE_COUNT` | 400 | Too many files (max 100) |
 | `INVALID_FILE_SIZE` | 400 | File size exceeds limit (5GB) |
 | `INVALID_FILENAME` | 400 | Invalid filename format |
+| `INVALID_ACTION` | 400 | Invalid cleanup action |
 | `TASK_NOT_FOUND` | 404 | Task ID does not exist |
 | `FILE_NOT_FOUND` | 404 | File ID does not exist |
 | `TASK_NOT_CANCELLABLE` | 409 | Task already completed/failed |
@@ -477,11 +517,12 @@ components:
 - **Task submission**: 10 requests per minute per user
 - **Status queries**: 100 requests per minute per user
 - **Cancel operations**: 5 requests per minute per user
+- **Cleanup operations**: 50 requests per minute per user
 
 ## Data Retention
 
 - **Task records**: 90 days (automatic cleanup)
-- **S3 files**: Deleted after successful download or task TTL
+- **S3 files**: Deleted after successful import/removal or task TTL
 - **CloudWatch logs**: 30 days retention
 
 ## Usage Examples
@@ -514,6 +555,28 @@ curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/
   -H "Authorization: AWS4-HMAC-SHA256 ..."
 ```
 
+### Cleanup File (after import)
+
+```bash
+curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/files/f1/cleanup \
+  -H "Content-Type: application/json" \
+  -H "Authorization: AWS4-HMAC-SHA256 ..." \
+  -d '{
+    "action": "downloaded"
+  }'
+```
+
+### Cleanup File (on removal)
+
+```bash
+curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/files/f1/cleanup \
+  -H "Content-Type: application/json" \
+  -H "Authorization: AWS4-HMAC-SHA256 ..." \
+  -d '{
+    "action": "removed"
+  }'
+```
+
 ## Integration Notes
 
 ### CLI Integration
@@ -523,6 +586,7 @@ The VCO CLI automatically handles:
 - Presigned URL uploads
 - Progress polling
 - Error handling and retries
+- File cleanup after import/removal
 
 ### S3 Key Structure
 
@@ -538,6 +602,28 @@ Tasks are stored with the following structure:
 - **Partition Key**: `task_id` (String)
 - **Attributes**: `status`, `quality_preset`, `files`, `created_at`, `updated_at`, `ttl`
 
+### File Status Transitions
+
+```
+PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
+                                 ↘ FAILED     ↘ REMOVED
+```
+
+- `COMPLETED`: File is ready for download
+- `DOWNLOADED`: File has been downloaded by user (excluded from `import --list`)
+- `REMOVED`: File has been removed by user (excluded from `import --list`)
+
 ## Changelog
 
+- **v1.2.0**: Replaced download-status with cleanup endpoint
+  - Removed `/tasks/{task_id}/download-status` endpoint
+  - Added `/tasks/{task_id}/files/{file_id}/cleanup` endpoint
+  - Added `REMOVED` to FileStatus enum
+  - Cleanup atomically updates status and deletes S3 file
+  - Status update is authoritative (S3 deletion failure is non-fatal)
+- **v1.1.0**: Refactored download status management
+  - Added `DOWNLOADED` to FileStatus enum
+  - Changed `DownloadStatusRequest` from `file_ids` (array) to `file_id` (single)
+  - Changed `DownloadStatusResponse` to return `file_id`, `status`, `downloaded_at`
+  - Removed `downloaded_at` and `download_available` from FileStatus schema
 - **v1.0.0**: Initial API specification

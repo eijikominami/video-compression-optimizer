@@ -409,7 +409,7 @@ convert.help = get_help("convert.description")
 @click.option("--clear", "clear_mode", is_flag=True, help=get_help("import.clear"))
 @click.option("--remove", "remove_id", help=get_help("import.remove"))
 @click.option("--json", "output_json", is_flag=True, help=get_help("import.json"))
-@click.argument("review_id", required=False)
+@click.argument("item_id", required=False)
 @click.pass_context
 def import_cmd(
     ctx,
@@ -418,64 +418,110 @@ def import_cmd(
     clear_mode: bool,
     remove_id: str | None,
     output_json: bool,
-    review_id: str | None,
+    item_id: str | None,
 ):
     """Import converted videos to Photos library."""
-    import_service = ImportService()
+    from vco.services.aws_import import AwsImportService
+    from vco.services.unified_import import UnifiedImportService
+
+    config = ctx.obj["config"]
+    aws_config = config.config.aws
+    local_service = ImportService()
+
+    # Initialize AWS service if configured
+    aws_service = None
+    api_url = getattr(aws_config, "async_api_url", None)
+    if not api_url:
+        api_url = f"https://dln48ri1di.execute-api.{aws_config.region}.amazonaws.com/dev"
+
+    if aws_config.s3_bucket:
+        try:
+            aws_service = AwsImportService(
+                api_url=api_url,
+                s3_bucket=aws_config.s3_bucket,
+                region=aws_config.region,
+                profile_name=aws_config.profile or None,
+            )
+        except Exception:
+            # AWS service initialization failed, continue with local only
+            pass
+
+    unified_service = UnifiedImportService(
+        local_service=local_service,
+        aws_service=aws_service,
+    )
 
     # --clear mode
     if clear_mode:
-        pending = import_service.list_pending()
-        if not pending:
-            console.print("[green]Review queue is already empty.[/green]")
+        # Get all importable items to show what will be deleted
+        list_result = unified_service.list_all_importable()
+        local_items = [item for item in list_result.all_items if item.source == "local"]
+        aws_items = [item for item in list_result.all_items if item.source == "aws"]
+
+        if not local_items and not aws_items:
+            console.print("[green]No items available for removal.[/green]")
             return
 
-        console.print(
-            f"[yellow]Will remove {len(pending)} items and files from review queue.[/yellow]"
-        )
+        console.print("[yellow]Will remove the following items and files:[/yellow]")
+        if local_items:
+            console.print(f"  • {len(local_items)} local items (files will be deleted)")
+        if aws_items:
+            console.print(f"  • {len(aws_items)} AWS items (S3 files will be deleted)")
+
         if not click.confirm("Do you want to proceed?"):
             console.print("Cancelled.")
             return
 
-        result = import_service.clear_queue()
+        result = unified_service.clear_all_queues()
         if result.success:
-            console.print(f"[green]✓ Removed {result.items_removed} items.[/green]")
-            console.print(f"[green]✓ Deleted {result.files_deleted} files.[/green]")
+            console.print(f"[green]✓ Removed {result.total_items_removed} items total.[/green]")
 
-            if result.files_failed > 0:
-                console.print(f"[yellow]⚠ {result.files_failed} file deletions failed.[/yellow]")
+            if result.local_items_removed > 0:
+                console.print(
+                    f"[green]✓ Local: {result.local_items_removed} items, {result.local_files_deleted} files deleted.[/green]"
+                )
+
+            if result.aws_items_removed > 0:
+                console.print(
+                    f"[green]✓ AWS: {result.aws_items_removed} items, {result.aws_files_deleted} S3 files deleted.[/green]"
+                )
+
+            if result.total_files_failed > 0:
+                console.print(
+                    f"[yellow]⚠ {result.total_files_failed} file deletions failed.[/yellow]"
+                )
                 for error in result.error_details[:3]:  # Show first 3 errors
                     console.print(f"  {error}")
                 if len(result.error_details) > 3:
                     console.print(f"  ... and {len(result.error_details) - 3} more errors")
         else:
-            console.print("[red]✗ Failed to clear queue.[/red]")
+            console.print("[red]✗ Failed to clear queues.[/red]")
             sys.exit(1)
         return
 
     # --remove mode
     if remove_id:
-        result = import_service.remove_item(remove_id)
+        result = unified_service.remove_item(remove_id)
         if result.success:
-            console.print(f"[green]✓ Removed {remove_id} from review queue.[/green]")
+            source_label = "AWS" if result.source == "aws" else "local"
+            console.print(f"[green]✓ Removed {remove_id} ({source_label}).[/green]")
 
-            if result.files_deleted:
+            if result.source == "local":
                 file_status = []
-                if result.files_deleted.video_deleted:
+                if result.file_deleted:
                     file_status.append("video file")
-                if result.files_deleted.metadata_deleted:
+                if result.metadata_deleted:
                     file_status.append("metadata file")
 
                 if file_status:
                     console.print(f"[green]✓ Deleted {', '.join(file_status)}.[/green]")
-
-                # Report any file deletion errors
-                if result.files_deleted.video_error or result.files_deleted.metadata_error:
-                    console.print("[yellow]⚠ Some file deletions failed:[/yellow]")
-                    if result.files_deleted.video_error:
-                        console.print(f"  Video: {result.files_deleted.video_error}")
-                    if result.files_deleted.metadata_error:
-                        console.print(f"  Metadata: {result.files_deleted.metadata_error}")
+            elif result.source == "aws":
+                if result.s3_deleted:
+                    console.print("[green]✓ Deleted S3 file.[/green]")
+                else:
+                    console.print("[yellow]⚠ Failed to delete S3 file.[/yellow]")
+            elif result.source == "aws" and result.s3_deleted:
+                console.print("[green]✓ Deleted S3 file.[/green]")
         else:
             console.print(f"[red]✗ Failed to remove: {result.error_message}[/red]")
             sys.exit(1)
@@ -483,48 +529,94 @@ def import_cmd(
 
     # --list mode
     if list_mode:
-        pending = import_service.list_pending()
+        list_result = unified_service.list_all_importable()
 
         if output_json:
-            items = [item.to_dict() for item in pending]
-            click.echo(json.dumps({"items": items}, indent=2))
+            items = [
+                {
+                    "item_id": item.item_id,
+                    "source": item.source,
+                    "original_filename": item.original_filename,
+                    "converted_filename": item.converted_filename,
+                    "original_size": item.original_size,
+                    "converted_size": item.converted_size,
+                    "compression_ratio": item.compression_ratio,
+                    "ssim_score": item.ssim_score,
+                    "albums": item.albums,
+                    "capture_date": item.capture_date.isoformat() if item.capture_date else None,
+                    "task_id": item.task_id,
+                    "file_id": item.file_id,
+                }
+                for item in list_result.all_items
+            ]
+            click.echo(
+                json.dumps(
+                    {
+                        "items": items,
+                        "aws_available": list_result.aws_available,
+                        "aws_error": list_result.aws_error,
+                    },
+                    indent=2,
+                )
+            )
             return
 
-        if not pending:
+        # Show AWS warning if unavailable
+        if not list_result.aws_available:
+            console.print(f"[yellow]⚠ AWS unavailable: {list_result.aws_error}[/yellow]")
+            console.print("[dim]Showing local items only.[/dim]")
+            console.print()
+
+        if list_result.total_count == 0:
             console.print("[green]No pending imports.[/green]")
             return
 
-        console.print(f"[bold]Pending imports: {len(pending)}[/bold]")
+        console.print(f"[bold]Pending imports: {list_result.total_count}[/bold]")
+        if list_result.local_items:
+            console.print(f"  Local: {len(list_result.local_items)}")
+        if list_result.aws_items:
+            console.print(f"  AWS: {len(list_result.aws_items)}")
         console.print()
 
         table = Table(title="Pending Imports")
+        table.add_column("Source", style="dim")
         table.add_column("ID", style="cyan")
         table.add_column("Filename")
         table.add_column("Original")
         table.add_column("Converted")
-        table.add_column("Savings", style="green")
+        table.add_column("Ratio", style="green")
         table.add_column("SSIM")
         table.add_column("Albums", style="magenta")
 
-        for item in pending:
-            qr = item.quality_result
-            original_size = qr.get("original_size", 0)
-            converted_size = qr.get("converted_size", 0)
-            savings = qr.get("space_saved_bytes", 0)
-            ssim = qr.get("ssim_score", 0)
-            albums = item.metadata.get("albums", [])
-            albums_str = ", ".join(albums[:3]) if albums else "-"
-            if len(albums) > 3:
-                albums_str += f" (+{len(albums) - 3})"
+        for item in list_result.all_items:
+            # Calculate savings
+            savings_ratio = f"{item.compression_ratio:.1f}x" if item.compression_ratio > 0 else "-"
+            ssim_str = f"{item.ssim_score:.4f}" if item.ssim_score > 0 else "-"
+            albums_str = ", ".join(item.albums[:2]) if item.albums else "-"
+            if len(item.albums) > 2:
+                albums_str += f" (+{len(item.albums) - 2})"
+
+            # Truncate filename
+            filename = item.converted_filename
+            if len(filename) > 25:
+                filename = filename[:22] + "..."
+
+            # Source label
+            source_label = "[blue]AWS[/blue]" if item.source == "aws" else "[green]Local[/green]"
+
+            # ID display (truncate for AWS)
+            display_id = item.item_id
+            if item.source == "aws" and len(display_id) > 20:
+                display_id = display_id[:17] + "..."
 
             table.add_row(
-                item.id,
-                item.converted_path.name[:25]
-                + ("..." if len(item.converted_path.name) > 25 else ""),
-                format_size(original_size),
-                format_size(converted_size),
-                format_size(savings),
-                f"{ssim:.4f}" if ssim else "N/A",
+                source_label,
+                display_id,
+                filename,
+                format_size(item.original_size),
+                format_size(item.converted_size),
+                savings_ratio,
+                ssim_str,
                 albums_str,
             )
 
@@ -537,13 +629,23 @@ def import_cmd(
 
     # --all mode
     if all_mode:
-        pending = import_service.list_pending()
+        list_result = unified_service.list_all_importable()
 
-        if not pending:
+        # Show AWS warning if unavailable
+        if not list_result.aws_available:
+            console.print(f"[yellow]⚠ AWS unavailable: {list_result.aws_error}[/yellow]")
+            console.print("[dim]Importing local items only.[/dim]")
+            console.print()
+
+        if list_result.total_count == 0:
             console.print("[green]No pending imports.[/green]")
             return
 
-        console.print(f"[bold]Importing {len(pending)} videos in batch[/bold]")
+        console.print(f"[bold]Importing {list_result.total_count} videos in batch[/bold]")
+        if list_result.local_items:
+            console.print(f"  Local: {len(list_result.local_items)}")
+        if list_result.aws_items:
+            console.print(f"  AWS: {len(list_result.aws_items)} (parallel download)")
         console.print()
         console.print(
             "[yellow]Note: After import, manually delete original videos in Photos app.[/yellow]"
@@ -557,7 +659,7 @@ def import_cmd(
         console.print()
         console.print("[bold]Importing...[/bold]")
 
-        result = import_service.import_all()
+        result = unified_service.import_all()
 
         if output_json:
             click.echo(
@@ -566,14 +668,21 @@ def import_cmd(
                         "total": result.total,
                         "successful": result.successful,
                         "failed": result.failed,
+                        "local_total": result.local_total,
+                        "local_successful": result.local_successful,
+                        "aws_total": result.aws_total,
+                        "aws_successful": result.aws_successful,
                         "results": [
                             {
                                 "success": r.success,
-                                "review_id": r.review_id,
+                                "item_id": r.item_id,
+                                "source": r.source,
                                 "original_filename": r.original_filename,
                                 "converted_filename": r.converted_filename,
                                 "albums": r.albums,
                                 "error_message": r.error_message,
+                                "downloaded": r.downloaded,
+                                "s3_deleted": r.s3_deleted,
                             }
                             for r in result.results
                         ],
@@ -589,12 +698,21 @@ def import_cmd(
         console.print(f"  Successful: [green]{result.successful}[/green]")
         console.print(f"  Failed: [red]{result.failed}[/red]")
 
+        if result.local_total > 0 or result.aws_total > 0:
+            console.print()
+            console.print("[dim]Breakdown:[/dim]")
+            if result.local_total > 0:
+                console.print(f"  Local: {result.local_successful}/{result.local_total} successful")
+            if result.aws_total > 0:
+                console.print(f"  AWS: {result.aws_successful}/{result.aws_total} successful")
+
         if result.failed > 0:
             console.print()
             console.print("[red]Errors:[/red]")
             for r in result.results:
                 if not r.success:
-                    console.print(f"  - {r.original_filename}: {r.error_message}")
+                    source_label = f"[{r.source}]"
+                    console.print(f"  - {source_label} {r.converted_filename}: {r.error_message}")
 
         if result.successful > 0:
             console.print()
@@ -603,55 +721,111 @@ def import_cmd(
         return
 
     # Single import mode
-    if not review_id:
-        console.print("[red]Error: Specify review_id or use --list or --all option.[/red]")
+    if not item_id:
+        console.print("[red]Error: Specify item_id or use --list or --all option.[/red]")
         console.print()
         console.print("Usage:")
         console.print("  vco import --list        List pending imports")
-        console.print("  vco import <review_id>   Import specified video")
+        console.print("  vco import <item_id>     Import specified video")
         console.print("  vco import --all         Import all videos")
+        console.print()
+        console.print("Item ID formats:")
+        console.print("  Local: abc123            (review ID)")
+        console.print("  AWS:   task-id:file-id   (task:file format)")
         sys.exit(1)
 
-    # Get item info first
-    item = import_service.review_service.get_review_by_id(review_id)
-    if item is None:
-        console.print(f"[red]Error: ID not found: {review_id}[/red]")
-        sys.exit(1)
+    # Determine if AWS or local item
+    is_aws = ":" in item_id
 
-    if item.status != "pending_review":
-        console.print(f"[yellow]This item has already been processed: {item.status}[/yellow]")
-        sys.exit(1)
+    if is_aws:
+        # AWS item - import directly without preview
+        console.print(f"[bold]Import AWS item: {item_id}[/bold]")
+        console.print()
+        console.print("Actions:")
+        console.print("  1. Download from S3")
+        console.print("  2. Import to Photos")
+        console.print("  3. Delete S3 file")
+        console.print()
+        console.print(
+            "[yellow]Note: After import, manually delete original video in Photos app.[/yellow]"
+        )
+        console.print()
 
-    albums = item.metadata.get("albums", [])
+        if not click.confirm("Do you want to proceed?"):
+            console.print("Cancelled.")
+            return
 
-    console.print(f"[bold]Import: {item.converted_path.name}[/bold]")
-    console.print()
-    console.print("Actions:")
-    console.print("  1. Import converted video to Photos")
-    if albums:
-        console.print(f"  2. Add to albums: {', '.join(albums)}")
-    console.print()
-    console.print(
-        "[yellow]Note: After import, manually delete original video in Photos app.[/yellow]"
-    )
-    console.print()
+        # Import with progress bar for download
+        from rich.progress import (
+            BarColumn,
+            DownloadColumn,
+            Progress,
+            TextColumn,
+            TimeRemainingColumn,
+            TransferSpeedColumn,
+        )
 
-    if not click.confirm("Do you want to proceed?"):
-        console.print("Cancelled.")
-        return
+        with Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            download_task = None
 
-    result = import_service.import_single(review_id)
+            def progress_callback(filename: str, percentage: int, downloaded: int, total: int):
+                nonlocal download_task
+                if download_task is None:
+                    download_task = progress.add_task(f"Downloading {filename}", total=total)
+                progress.update(download_task, completed=downloaded)
+
+            result = unified_service.import_item(item_id, progress_callback=progress_callback)
+    else:
+        # Local item - get info first
+        item = local_service.review_service.get_review_by_id(item_id)
+        if item is None:
+            console.print(f"[red]Error: ID not found: {item_id}[/red]")
+            sys.exit(1)
+
+        if item.status != "pending_review":
+            console.print(f"[yellow]This item has already been processed: {item.status}[/yellow]")
+            sys.exit(1)
+
+        albums = item.metadata.get("albums", [])
+
+        console.print(f"[bold]Import: {item.converted_path.name}[/bold]")
+        console.print()
+        console.print("Actions:")
+        console.print("  1. Import converted video to Photos")
+        if albums:
+            console.print(f"  2. Add to albums: {', '.join(albums)}")
+        console.print()
+        console.print(
+            "[yellow]Note: After import, manually delete original video in Photos app.[/yellow]"
+        )
+        console.print()
+
+        if not click.confirm("Do you want to proceed?"):
+            console.print("Cancelled.")
+            return
+
+        result = unified_service.import_item(item_id)
 
     if output_json:
         click.echo(
             json.dumps(
                 {
                     "success": result.success,
-                    "review_id": result.review_id,
+                    "item_id": result.item_id,
+                    "source": result.source,
                     "original_filename": result.original_filename,
                     "converted_filename": result.converted_filename,
                     "albums": result.albums,
                     "error_message": result.error_message,
+                    "downloaded": result.downloaded,
+                    "s3_deleted": result.s3_deleted,
                 },
                 indent=2,
             )
@@ -660,6 +834,11 @@ def import_cmd(
 
     if result.success:
         console.print("[green]✓ Import to Photos completed[/green]")
+        if result.source == "aws":
+            if result.downloaded:
+                console.print("[green]✓ Downloaded from S3[/green]")
+            if result.s3_deleted:
+                console.print("[green]✓ S3 file deleted[/green]")
         if result.albums:
             console.print(f"[green]✓ Added to albums: {', '.join(result.albums)}[/green]")
         console.print()
@@ -1053,7 +1232,16 @@ cancel.help = get_help("cancel.description")
 @click.option("--json", "output_json", is_flag=True, help=get_help("download.json"))
 @click.pass_context
 def download(ctx, task_id: str, output_dir: str | None, no_resume: bool, output_json: bool):
-    """Download results from completed async tasks."""
+    """Download results from completed async tasks.
+
+    DEPRECATED: Use 'vco import' instead.
+    """
+    # Show deprecation warning
+    console.print("[yellow]⚠ 'vco download' is deprecated. Use 'vco import' instead.[/yellow]")
+    console.print("[dim]  vco import --list    List all importable items (local + AWS)[/dim]")
+    console.print("[dim]  vco import --all     Import all items[/dim]")
+    console.print()
+
     from rich.progress import (
         BarColumn,
         DownloadColumn,

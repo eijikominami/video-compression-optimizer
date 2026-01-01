@@ -585,119 +585,72 @@ class TestDownloadProgressMethods:
         assert progress.progress_percentage == 100
 
 
-class TestAsyncFileDownloadFields:
-    """Test AsyncFile downloaded_at and download_available fields.
+class TestFileStatusDownloaded:
+    """Test FileStatus.DOWNLOADED for tracking downloaded files.
 
-    Task 3.2: AsyncFile 拡張
-    - downloaded_at: ダウンロード完了日時
-    - download_available: S3 にファイルが存在するか
-
-    Requirements: 8.1
+    Requirements: 4.4 - File status transitions to DOWNLOADED after download
     """
 
-    def test_default_values(self):
-        """New AsyncFile should have default download field values."""
-        file = AsyncFile(
-            file_id="file-1",
-            original_uuid="uuid-1",
-            filename="test.mp4",
-            source_s3_key="source/test.mp4",
-        )
-        assert file.downloaded_at is None
-        assert file.download_available is True
+    def test_file_status_has_downloaded_value(self):
+        """FileStatus enum should include DOWNLOADED value."""
+        from vco.models.async_task import FileStatus
 
-    def test_downloaded_at_can_be_set(self):
-        """downloaded_at can be set to a datetime."""
-        now = datetime.now()
-        file = AsyncFile(
-            file_id="file-1",
-            original_uuid="uuid-1",
-            filename="test.mp4",
-            source_s3_key="source/test.mp4",
-            downloaded_at=now,
-        )
-        assert file.downloaded_at == now
+        assert hasattr(FileStatus, "DOWNLOADED")
+        assert FileStatus.DOWNLOADED.value == "DOWNLOADED"
 
-    def test_download_available_can_be_false(self):
-        """download_available can be set to False."""
-        file = AsyncFile(
-            file_id="file-1",
-            original_uuid="uuid-1",
-            filename="test.mp4",
-            source_s3_key="source/test.mp4",
-            download_available=False,
-        )
-        assert file.download_available is False
+    def test_file_can_have_downloaded_status(self):
+        """AsyncFile can have DOWNLOADED status."""
+        from vco.models.async_task import FileStatus
 
-    def test_to_dict_includes_download_fields(self):
-        """to_dict should include downloaded_at and download_available."""
-        now = datetime.now()
         file = AsyncFile(
             file_id="file-1",
             original_uuid="uuid-1",
             filename="test.mp4",
             source_s3_key="source/test.mp4",
-            downloaded_at=now,
-            download_available=False,
+            status=FileStatus.DOWNLOADED,
+        )
+        assert file.status == FileStatus.DOWNLOADED
+
+    def test_to_dict_includes_downloaded_status(self):
+        """to_dict should serialize DOWNLOADED status correctly."""
+        from vco.models.async_task import FileStatus
+
+        file = AsyncFile(
+            file_id="file-1",
+            original_uuid="uuid-1",
+            filename="test.mp4",
+            source_s3_key="source/test.mp4",
+            status=FileStatus.DOWNLOADED,
         )
         data = file.to_dict()
-        assert "downloaded_at" in data
-        assert data["downloaded_at"] == now.isoformat()
-        assert "download_available" in data
-        assert data["download_available"] is False
+        assert data["status"] == "DOWNLOADED"
 
-    def test_to_dict_downloaded_at_none(self):
-        """to_dict should handle None downloaded_at."""
-        file = AsyncFile(
-            file_id="file-1",
-            original_uuid="uuid-1",
-            filename="test.mp4",
-            source_s3_key="source/test.mp4",
-        )
-        data = file.to_dict()
-        assert data["downloaded_at"] is None
-        assert data["download_available"] is True
+    def test_from_dict_restores_downloaded_status(self):
+        """from_dict should restore DOWNLOADED status."""
+        from vco.models.async_task import FileStatus
 
-    def test_from_dict_with_download_fields(self):
-        """from_dict should restore downloaded_at and download_available."""
-        now = datetime.now()
         data = {
             "file_id": "file-1",
             "original_uuid": "uuid-1",
             "filename": "test.mp4",
             "source_s3_key": "source/test.mp4",
-            "downloaded_at": now.isoformat(),
-            "download_available": False,
+            "status": "DOWNLOADED",
         }
         file = AsyncFile.from_dict(data)
-        assert file.downloaded_at == now
-        assert file.download_available is False
+        assert file.status == FileStatus.DOWNLOADED
 
-    def test_from_dict_without_download_fields(self):
-        """from_dict should use defaults when download fields are missing."""
-        data = {
-            "file_id": "file-1",
-            "original_uuid": "uuid-1",
-            "filename": "test.mp4",
-            "source_s3_key": "source/test.mp4",
-        }
-        file = AsyncFile.from_dict(data)
-        assert file.downloaded_at is None
-        assert file.download_available is True
+    def test_roundtrip_with_downloaded_status(self):
+        """to_dict -> from_dict roundtrip should preserve DOWNLOADED status."""
+        from vco.models.async_task import FileStatus
 
-    def test_roundtrip_with_download_fields(self):
-        """to_dict -> from_dict roundtrip should preserve download fields."""
-        now = datetime.now()
         original = AsyncFile(
             file_id="file-1",
             original_uuid="uuid-1",
             filename="test.mp4",
             source_s3_key="source/test.mp4",
-            downloaded_at=now,
-            download_available=False,
+            status=FileStatus.DOWNLOADED,
         )
         data = original.to_dict()
         restored = AsyncFile.from_dict(data)
 
-        assert restored.downloaded_at == original.downloaded_at
-        assert restored.download_available == original.download_available
+        assert restored.status == original.status

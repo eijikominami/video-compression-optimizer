@@ -413,6 +413,97 @@ class TestStepFunctionsLambdaInterface:
 class TestCliApiGatewayInterface:
     """Tests for CLI → API Gateway interface (Task 9.4)."""
 
+    def test_file_response_includes_conversion_progress_percentage(self):
+        """Test that file response includes conversion_progress_percentage field.
+
+        This test ensures Lambda returns the field that CLI uses for progress display.
+        Bug prevention: CLI showed 0% progress while task showed 18% because
+        Lambda didn't include conversion_progress_percentage in file response.
+        """
+        # Create a task with files in various states
+        task = {
+            "task_id": "task-123",
+            "status": "CONVERTING",
+            "quality_preset": "balanced",
+            "files": [
+                {
+                    "file_id": "file-1",
+                    "filename": "video1.mov",
+                    "status": "CONVERTING",
+                    "mediaconvert_job_id": "job-123",
+                },
+                {
+                    "file_id": "file-2",
+                    "filename": "video2.mov",
+                    "status": "VERIFYING",
+                },
+                {
+                    "file_id": "file-3",
+                    "filename": "video3.mov",
+                    "status": "COMPLETED",
+                },
+            ],
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
+
+        # Use Lambda's format_task_response
+        from unittest.mock import patch
+
+        with patch.object(status_app, "get_mediaconvert_job_progress", return_value=50):
+            response = status_app.format_task_response(task)
+
+        # Verify each file has conversion_progress_percentage
+        for file in response["files"]:
+            assert "conversion_progress_percentage" in file, (
+                f"File {file['file_id']} missing conversion_progress_percentage field"
+            )
+            assert isinstance(file["conversion_progress_percentage"], int), (
+                f"conversion_progress_percentage should be int, got {type(file['conversion_progress_percentage'])}"
+            )
+            assert 0 <= file["conversion_progress_percentage"] <= 100, (
+                f"conversion_progress_percentage should be 0-100, got {file['conversion_progress_percentage']}"
+            )
+
+    def test_file_progress_matches_status(self):
+        """Test that file progress percentage matches expected values for each status.
+
+        Progress mapping:
+        - PENDING: 0%
+        - CONVERTING: 0-30% (scaled from MediaConvert)
+        - VERIFYING: 65%
+        - COMPLETED/FAILED: 100%
+        """
+        test_cases = [
+            ("PENDING", 0, 0),
+            ("VERIFYING", 65, 65),
+            ("COMPLETED", 100, 100),
+            ("FAILED", 100, 100),
+        ]
+
+        for status, expected_min, expected_max in test_cases:
+            task = {
+                "task_id": "task-123",
+                "status": status,
+                "quality_preset": "balanced",
+                "files": [
+                    {
+                        "file_id": "file-1",
+                        "filename": "video.mov",
+                        "status": status,
+                    }
+                ],
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+            }
+
+            response = status_app.format_task_response(task)
+            file_progress = response["files"][0]["conversion_progress_percentage"]
+
+            assert expected_min <= file_progress <= expected_max, (
+                f"Status {status}: expected progress {expected_min}-{expected_max}, got {file_progress}"
+            )
+
     def test_conversion_candidate_to_api_request(self):
         """Test ConversionCandidate → API request transformation."""
         from dataclasses import dataclass

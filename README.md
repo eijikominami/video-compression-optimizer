@@ -124,17 +124,18 @@ vco status <task-id>          # Show task details
 # Cancel a running task
 vco cancel <task-id>
 
-# Download completed files
-vco download <task-id>        # Download all completed files
-vco download <task-id> --resume  # Resume interrupted download
+# Import completed files (replaces vco download)
+vco import --list             # List all importable items (local + AWS)
+vco import --all              # Import all items
+vco import <task-id:file-id>  # Import specific AWS file
 ```
 
 #### Async Workflow Benefits
 
 - **Background processing**: Submit tasks and check status later
 - **Parallel conversion**: Multiple files processed concurrently
-- **Resumable downloads**: Interrupted downloads can be resumed
-- **Partial completion**: Download successful files even if some fail
+- **Unified import**: Import from both local queue and AWS with single command
+- **Partial completion**: Import successful files even if some fail
 
 #### Configuration
 
@@ -148,24 +149,33 @@ vco config
 
 ### Import
 
+Import converted videos from both local queue and AWS completed tasks:
+
 ```bash
-# Show import queue (with album names)
+# Show import queue (local + AWS)
 vco import --list
 
 # Import specified video to Photos
-vco import <review-id>
+vco import <item-id>          # Local: review-id, AWS: task-id:file-id
 
-# Batch import all videos
+# Batch import all videos (local + AWS)
 vco import --all
 
 # Remove specified ID from queue (also deletes files)
-vco import --remove <review-id>
+vco import --remove <item-id>
 
-# Clear entire review queue (also deletes files)
+# Clear local review queue only (also deletes files)
 vco import --clear
 ```
 
-**Note**: The `--remove` and `--clear` options delete both the queue entry and the corresponding converted video and metadata files from the staging folder.
+**Item ID formats**:
+- Local items: `abc123` (review ID)
+- AWS items: `task-uuid:file-uuid` (task:file format)
+
+**Note**: 
+- The `--remove` and `--clear` options delete both the queue entry and the corresponding converted video and metadata files.
+- `--clear` only affects local queue; AWS items remain in S3.
+- `vco download` is deprecated. Use `vco import` instead.
 
 After import, manually delete original videos in Photos app.
 

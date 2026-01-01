@@ -294,3 +294,62 @@ class TestHelperMethods:
             id1 = cmd._get_machine_id()
             id2 = cmd._get_machine_id()
             assert id1 == id2
+
+
+class TestUpdateFileStatusToDownloaded:
+    """Tests for update_file_status_to_downloaded method."""
+
+    def test_update_file_status_to_downloaded(self):
+        """Test updating file status to DOWNLOADED."""
+        with patch("boto3.Session"):
+            cmd = StatusCommand(api_url="https://api.example.com")
+            cmd._call_api = MagicMock(
+                return_value={
+                    "file_id": "file-1",
+                    "status": "DOWNLOADED",
+                    "downloaded_at": "2024-01-01T10:00:00",
+                }
+            )
+
+            result = cmd.update_file_status_to_downloaded(
+                task_id="task-1",
+                file_id="file-1",
+                user_id="user-123",
+            )
+
+            assert result is True
+            cmd._call_api.assert_called_once_with(
+                method="POST",
+                path="/tasks/task-1/download-status",
+                params={"user_id": "user-123"},
+                body={"file_id": "file-1"},
+            )
+
+    def test_update_file_status_to_downloaded_api_error(self):
+        """Test handling of API error."""
+        with patch("boto3.Session"):
+            cmd = StatusCommand(api_url="https://api.example.com")
+            cmd._call_api = MagicMock(side_effect=Exception("API error"))
+
+            result = cmd.update_file_status_to_downloaded(
+                task_id="task-1",
+                file_id="file-1",
+            )
+
+            assert result is False
+
+    def test_update_file_status_to_downloaded_uses_machine_id_when_no_user_id(self):
+        """Test that machine ID is used when user_id is not provided."""
+        with patch("boto3.Session"):
+            cmd = StatusCommand(api_url="https://api.example.com")
+            cmd._call_api = MagicMock(return_value={})
+            cmd._get_machine_id = MagicMock(return_value="machine-id-123")
+
+            cmd.update_file_status_to_downloaded(
+                task_id="task-1",
+                file_id="file-1",
+            )
+
+            cmd._get_machine_id.assert_called_once()
+            call_args = cmd._call_api.call_args
+            assert call_args[1]["params"]["user_id"] == "machine-id-123"

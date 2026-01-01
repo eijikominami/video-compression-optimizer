@@ -7,6 +7,9 @@ conversion tasks that run on AWS Step Functions.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any
+
+from vco.models.base import BaseVideoMetadata
 
 
 class TaskStatus(Enum):
@@ -30,6 +33,7 @@ class FileStatus(Enum):
     - CONVERTING: MediaConvert job running (0-30% progress)
     - VERIFYING: SSIM quality check running (65% progress, fixed)
     - COMPLETED: Successfully processed (100%)
+    - DOWNLOADED: File has been downloaded by user
     - FAILED: Processing failed (100%)
     """
 
@@ -37,17 +41,19 @@ class FileStatus(Enum):
     CONVERTING = "CONVERTING"
     VERIFYING = "VERIFYING"
     COMPLETED = "COMPLETED"
+    DOWNLOADED = "DOWNLOADED"
     FAILED = "FAILED"
 
 
 @dataclass
-class AsyncFile:
+class AsyncFile(BaseVideoMetadata):
     """An individual file within an async conversion task.
+
+    Inherits common fields (uuid, filename, file_size, capture_date, location)
+    from BaseVideoMetadata. The uuid field corresponds to original_uuid.
 
     Attributes:
         file_id: Unique identifier for this file (UUID v4)
-        original_uuid: UUID from Photos library
-        filename: Original filename
         source_s3_key: S3 key for the uploaded source file
         output_s3_key: S3 key for the converted output file
         metadata_s3_key: S3 key for the metadata sidecar file
@@ -58,16 +64,17 @@ class AsyncFile:
         error_message: Error message if processing failed
         retry_count: Number of retry attempts for transient errors
         preset_attempts: List of presets attempted (for adaptive presets)
-        source_size_bytes: Original file size in bytes
+        source_size_bytes: Original file size in bytes (deprecated, use file_size)
         output_size_bytes: Converted file size in bytes
         output_checksum: Checksum of the output file (ETag or SHA256)
         checksum_algorithm: Algorithm used for checksum ("ETag" or "SHA256")
+        downloaded_at: Timestamp when file was downloaded by user
+        download_available: Whether file is available for download
     """
 
-    file_id: str
-    original_uuid: str
-    filename: str
-    source_s3_key: str
+    # AsyncFile specific fields (all with defaults to avoid dataclass issues)
+    file_id: str = ""
+    source_s3_key: str = ""
     output_s3_key: str | None = None
     metadata_s3_key: str | None = None
     status: FileStatus = FileStatus.PENDING
@@ -77,40 +84,59 @@ class AsyncFile:
     error_message: str | None = None
     retry_count: int = 0
     preset_attempts: list[str] = field(default_factory=list)
-    source_size_bytes: int | None = None
+    source_size_bytes: int | None = None  # Deprecated, use file_size
     output_size_bytes: int | None = None
     output_checksum: str | None = None
     checksum_algorithm: str = "ETag"
+    downloaded_at: datetime | None = None
+    download_available: bool = False
 
-    def to_dict(self) -> dict:
+    @property
+    def original_uuid(self) -> str:
+        """Alias for uuid field for backward compatibility."""
+        return self.uuid
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for DynamoDB storage."""
-        return {
-            "file_id": self.file_id,
-            "original_uuid": self.original_uuid,
-            "filename": self.filename,
-            "source_s3_key": self.source_s3_key,
-            "output_s3_key": self.output_s3_key,
-            "metadata_s3_key": self.metadata_s3_key,
-            "status": self.status.value,
-            "mediaconvert_job_id": self.mediaconvert_job_id,
-            "quality_result": self.quality_result,
-            "error_code": self.error_code,
-            "error_message": self.error_message,
-            "retry_count": self.retry_count,
-            "preset_attempts": self.preset_attempts,
-            "source_size_bytes": self.source_size_bytes,
-            "output_size_bytes": self.output_size_bytes,
-            "output_checksum": self.output_checksum,
-            "checksum_algorithm": self.checksum_algorithm,
-        }
+        base_dict = super().to_dict()
+        base_dict.update(
+            {
+                "file_id": self.file_id,
+                "original_uuid": self.uuid,  # Keep for API compatibility
+                "source_s3_key": self.source_s3_key,
+                "output_s3_key": self.output_s3_key,
+                "metadata_s3_key": self.metadata_s3_key,
+                "status": self.status.value,
+                "mediaconvert_job_id": self.mediaconvert_job_id,
+                "quality_result": self.quality_result,
+                "error_code": self.error_code,
+                "error_message": self.error_message,
+                "retry_count": self.retry_count,
+                "preset_attempts": self.preset_attempts,
+                "source_size_bytes": self.source_size_bytes,
+                "output_size_bytes": self.output_size_bytes,
+                "output_checksum": self.output_checksum,
+                "checksum_algorithm": self.checksum_algorithm,
+                "downloaded_at": self.downloaded_at.isoformat() if self.downloaded_at else None,
+                "download_available": self.download_available,
+            }
+        )
+        return base_dict
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AsyncFile":
+    def from_dict(cls, data: dict[str, Any]) -> "AsyncFile":
         """Create from dictionary (DynamoDB data)."""
         return cls(
+            # Base fields
+            uuid=data.get("original_uuid", data.get("uuid", "")),
+            filename=data.get("filename", ""),
+            file_size=data.get("file_size", data.get("source_size_bytes", 0)),
+            capture_date=datetime.fromisoformat(data["capture_date"])
+            if data.get("capture_date")
+            else None,
+            location=tuple(data["location"]) if data.get("location") else None,
+            # AsyncFile specific fields
             file_id=data["file_id"],
-            original_uuid=data["original_uuid"],
-            filename=data["filename"],
             source_s3_key=data["source_s3_key"],
             output_s3_key=data.get("output_s3_key"),
             metadata_s3_key=data.get("metadata_s3_key"),
@@ -125,6 +151,10 @@ class AsyncFile:
             output_size_bytes=data.get("output_size_bytes"),
             output_checksum=data.get("output_checksum"),
             checksum_algorithm=data.get("checksum_algorithm", "ETag"),
+            downloaded_at=datetime.fromisoformat(data["downloaded_at"])
+            if data.get("downloaded_at")
+            else None,
+            download_available=data.get("download_available", False),
         )
 
 
