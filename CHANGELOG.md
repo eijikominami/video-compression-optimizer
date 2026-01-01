@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CLI エラーハンドリングの改善**
+  - AWS エラー発生時に Python Traceback を表示しないよう修正
+  - 404, 403, ExpiredToken などの一般的な AWS エラーに対するユーザーフレンドリーなメッセージを追加
+  - Photos インポート失敗時に S3 ファイルが削除されないことを保証するテストを追加
+
 - **Lambda エフェメラルストレージ不足の修正**
   - 品質チェック Lambda のエフェメラルストレージを 512MB から 10GB に増加
   - 大容量動画（最大約 5GB）の品質チェックが可能に
