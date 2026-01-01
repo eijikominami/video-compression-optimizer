@@ -104,19 +104,13 @@ vco convert --top-n 5
 
 # Dry run (no actual conversion)
 vco convert --dry-run
-
-# Async conversion (submit to AWS Step Functions)
-vco convert --async
 ```
 
 ### Async Workflow
 
-For large batch conversions, use the async workflow to submit tasks to AWS Step Functions:
+Conversions are processed asynchronously via AWS Step Functions. After submitting a conversion, you can check status and manage tasks:
 
 ```bash
-# Submit async conversion task
-vco convert --async
-
 # Check task status
 vco status                    # List all active tasks
 vco status <task-id>          # Show task details
@@ -136,16 +130,6 @@ vco import <task-id:file-id>  # Import specific AWS file
 - **Parallel conversion**: Multiple files processed concurrently
 - **Unified import**: Import from both local queue and AWS with single command
 - **Partial completion**: Import successful files even if some fail
-
-#### Configuration
-
-```bash
-# Set default conversion mode
-vco config set conversion.default_convert_mode async
-
-# View current mode
-vco config
-```
 
 ### Import
 

@@ -104,19 +104,13 @@ vco convert --top-n 5
 
 # ドライラン（実際の変換なし）
 vco convert --dry-run
-
-# 非同期変換（AWS Step Functions に送信）
-vco convert --async
 ```
 
 ### 非同期ワークフロー
 
-大量の動画を変換する場合は、非同期ワークフローを使用して AWS Step Functions にタスクを送信できます：
+変換は AWS Step Functions を通じて非同期で処理されます。変換を送信した後、状態を確認してタスクを管理できます：
 
 ```bash
-# 非同期変換タスクを送信
-vco convert --async
-
 # タスク状態を確認
 vco status                    # アクティブなタスク一覧
 vco status <task-id>          # タスク詳細を表示
@@ -136,16 +130,6 @@ vco import <task-id:file-id>  # 特定の AWS ファイルをインポート
 - **並列変換**: 複数ファイルを同時に処理
 - **統合インポート**: ローカルと AWS の両方を単一コマンドでインポート
 - **部分完了**: 一部失敗しても成功したファイルをインポート可能
-
-#### 設定
-
-```bash
-# デフォルトの変換モードを設定
-vco config set conversion.default_convert_mode async
-
-# 現在のモードを確認
-vco config
-```
 
 ### インポート
 
