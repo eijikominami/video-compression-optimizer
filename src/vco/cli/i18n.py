@@ -150,11 +150,6 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "設定値を変更",
         "en": "Modify configuration value",
     },
-    # convert --async option
-    "convert.async": {
-        "ja": "非同期モードで変換（AWS Step Functions を使用）",
-        "en": "Convert asynchronously using AWS Step Functions",
-    },
     # status command
     "status.description": {
         "ja": "非同期タスクの状態を確認\n\n"

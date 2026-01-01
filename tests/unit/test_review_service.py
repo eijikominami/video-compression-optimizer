@@ -10,8 +10,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from vco.metadata.manager import VideoMetadata
+from vco.models.types import ConversionResult
 from vco.quality.checker import QualityResult
-from vco.services.convert import ConversionResult
 from vco.services.review import (
     ReviewItem,
     ReviewQueue,

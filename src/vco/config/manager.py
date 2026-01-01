@@ -33,7 +33,6 @@ class ConversionConfig:
         quality_preset: Quality preset (high, balanced, compression)
         max_concurrent: Maximum concurrent conversions (1-10)
         staging_folder: Folder for converted files awaiting review
-        default_convert_mode: Default conversion mode (sync or async)
     """
 
     quality_preset: str = "balanced"
@@ -43,7 +42,6 @@ class ConversionConfig:
             Path.home() / "Movies" / "VideoCompressionOptimizer" / "converted"
         )
     )
-    default_convert_mode: str = "sync"
 
     def __post_init__(self):
         """Validate configuration values."""
@@ -56,12 +54,6 @@ class ConversionConfig:
         if not 1 <= self.max_concurrent <= 10:
             raise ValueError(
                 f"Invalid max_concurrent: {self.max_concurrent}. Must be between 1 and 10"
-            )
-        valid_modes = ("sync", "async")
-        if self.default_convert_mode not in valid_modes:
-            raise ValueError(
-                f"Invalid default_convert_mode: {self.default_convert_mode}. "
-                f"Must be one of: {', '.join(valid_modes)}"
             )
 
     @property
@@ -148,7 +140,7 @@ class ConfigManager:
                 "staging_folder",
                 str(Path.home() / "Movies" / "VideoCompressionOptimizer" / "converted"),
             ),
-            default_convert_mode=conversion_data.get("default_convert_mode", "sync"),
+            # Note: default_convert_mode is ignored for backward compatibility
         )
 
         return Config(
@@ -179,7 +171,6 @@ class ConfigManager:
                 "quality_preset": config.conversion.quality_preset,
                 "max_concurrent": config.conversion.max_concurrent,
                 "staging_folder": config.conversion.staging_folder,
-                "default_convert_mode": config.conversion.default_convert_mode,
             },
         }
 
@@ -259,11 +250,6 @@ class ConfigManager:
                 value = int(value)
                 if not 1 <= value <= 10:
                     raise ValueError(f"Invalid max_concurrent: {value}. Must be between 1 and 10")
-            valid_modes = ("sync", "async")
-            if name == "default_convert_mode" and value not in valid_modes:
-                raise ValueError(
-                    f"Invalid default_convert_mode: {value}. Must be one of: {', '.join(valid_modes)}"
-                )
 
         setattr(section_obj, name, value)
 

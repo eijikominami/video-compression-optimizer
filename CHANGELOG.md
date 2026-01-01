@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **非同期モードがデフォルトに**
+  - `vco convert` は常に非同期モード（AWS Step Functions）で動作
+  - `--async` フラグは削除（不要になったため）
+  - 同期モード（ローカル変換）は廃止
+
+### Removed
+
+- **`--async` フラグ**
+  - `vco convert --async` は `vco convert` に統合
+  - 非同期モードがデフォルトになったため不要
+
+- **`default_convert_mode` 設定**
+  - `vco config set conversion.default_convert_mode` は削除
+  - 同期モードが廃止されたため不要
+
+- **同期変換機能（ConvertService）**
+  - ローカルでの同期変換機能を削除
+  - 全ての変換は AWS Step Functions 経由で実行
+
 ### Added
 
 - **`vco import` コマンドの AWS 統合**
@@ -17,17 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `vco import --remove <task-id:file-id>` - AWS アイテムの削除（S3 ファイル削除）
   - AWS 利用不可時はローカルのみ表示（警告メッセージ付き）
 
-- **非同期変換ワークフロー（`vco convert --async`）**
+- **非同期変換ワークフロー**
   - AWS Step Functions による非同期変換処理
   - `vco status` - タスク状態の確認
   - `vco status <task-id>` - タスク詳細の表示
   - `vco cancel <task-id>` - 実行中タスクのキャンセル
   - 再開可能なダウンロード
   - 部分完了時の成功ファイルダウンロード
-
-- **デフォルト変換モード設定**
-  - `vco config set conversion.default_convert_mode sync|async`
-  - 同期/非同期モードの切り替え
 
 - **AWS インフラストラクチャ（非同期ワークフロー用）**
   - DynamoDB テーブル（タスク管理）

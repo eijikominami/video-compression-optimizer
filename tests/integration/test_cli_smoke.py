@@ -152,3 +152,20 @@ class TestCLIInvalidCommands:
         # May succeed (showing help) or fail (missing args)
         # Either way, it should not crash with an exception
         assert "traceback" not in result.stderr.lower() or result.returncode in [0, 1, 2]
+
+    def test_vco_convert_async_flag_rejected(self):
+        """vco convert --async should be rejected as unknown option.
+
+        Requirements: 1.3, 6.3
+        The --async flag has been removed. Using it should result in an error.
+        """
+        result = subprocess.run(
+            [sys.executable, "-m", "vco.cli.main", "convert", "--async"],
+            capture_output=True,
+            text=True,
+            cwd="/Users/kominami/Documents/Code/video-compression-optimizer",
+        )
+        # Should fail with non-zero exit code
+        assert result.returncode != 0
+        # Should show "No such option" error
+        assert "no such option" in result.stderr.lower()

@@ -526,7 +526,7 @@ class DownloadCommand:
                 return False
 
             # Create a minimal conversion result for review service
-            from vco.services.convert import ConversionResult
+            from vco.models.types import ConversionResult
 
             # Get quality result from file detail
             quality_result = None
