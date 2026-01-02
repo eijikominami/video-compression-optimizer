@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **iCloud 自動ダウンロード機能**
+  - `vco convert` 実行時に iCloud 動画を自動ダウンロード
+  - Swift PhotoKit の `PHAssetResourceManager` を使用したネイティブダウンロード
+  - Rich Progress による進捗表示
+  - `--skip-icloud` オプションで iCloud 動画をスキップ可能
+  - `--download-timeout` オプションでタイムアウト設定（デフォルト: 300 秒）
+  - `--yes` / `-y` オプションで確認プロンプトをスキップ
+  - ディスク容量チェックとエラーハンドリング
+
 - **Swift Native PhotoKit 実装**
   - Photos ライブラリアクセスを Python (osxphotos) から Swift (PhotoKit) に移行
   - パフォーマンス向上: ネイティブ API による高速スキャン

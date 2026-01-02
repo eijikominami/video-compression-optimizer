@@ -244,6 +244,7 @@ class TestConfigCommand:
                 "quality_preset": "balanced",
                 "max_concurrent": 5,
                 "staging_folder": "/tmp/staging",
+                "download_timeout": 300,
             },
         }
         mock_config.return_value = mock_config_instance

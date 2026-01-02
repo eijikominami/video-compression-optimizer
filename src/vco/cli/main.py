@@ -245,10 +245,26 @@ scan.help = get_help("scan.description")
 )
 @click.option("--top-n", type=int, help=get_help("convert.top_n"))
 @click.option("--dry-run", is_flag=True, help=get_help("convert.dry_run"))
+@click.option("--skip-icloud", is_flag=True, help=get_help("convert.skip_icloud"))
+@click.option("--download-timeout", type=int, help=get_help("convert.download_timeout"))
+@click.option("--yes", "-y", is_flag=True, help=get_help("convert.yes"))
+@click.option("--legacy", is_flag=True, help=get_help("convert.legacy"))
 @click.pass_context
-def convert(ctx, quality: str, top_n: int | None, dry_run: bool):
+def convert(
+    ctx,
+    quality: str,
+    top_n: int | None,
+    dry_run: bool,
+    skip_icloud: bool,
+    download_timeout: int | None,
+    yes: bool,
+    legacy: bool,
+):
     """Convert candidate videos to H.265."""
     config = ctx.obj["config"]
+
+    # Get download timeout from option or config
+    timeout = download_timeout or config.get("conversion.download_timeout")
 
     # Load candidates
     scan_service = ScanService()
@@ -269,8 +285,46 @@ def convert(ctx, quality: str, top_n: int | None, dry_run: bool):
             f"[bold]Selected top {len(candidates_to_convert)} candidates by file size[/bold]"
         )
 
+    # Classify candidates: local vs iCloud
+    local_candidates = [c for c in candidates_to_convert if c.video.is_local]
+    icloud_candidates = [c for c in candidates_to_convert if not c.video.is_local]
+
     console.print(f"[bold]Found {len(candidates_to_convert)} candidates for conversion[/bold]")
+    if icloud_candidates:
+        console.print(f"  Local: {len(local_candidates)}")
+        console.print(f"  iCloud: {len(icloud_candidates)}")
     console.print(f"Quality preset: {quality}")
+
+    # Handle iCloud candidates
+    downloaded_candidates: list = []
+    if icloud_candidates:
+        if legacy:
+            # Legacy mode: skip iCloud videos with message
+            console.print()
+            console.print("[yellow]⚠ Legacy mode: iCloud auto-download is not available.[/yellow]")
+            console.print(
+                f"[yellow]  Skipping {len(icloud_candidates)} iCloud-only videos.[/yellow]"
+            )
+        elif skip_icloud:
+            # Skip iCloud videos
+            console.print()
+            console.print(
+                f"[yellow]⚠ Skipping {len(icloud_candidates)} iCloud-only videos (--skip-icloud).[/yellow]"
+            )
+        else:
+            # Download iCloud videos
+            downloaded_candidates = _download_icloud_videos(icloud_candidates, timeout, yes)
+
+    # Combine local and downloaded candidates
+    final_candidates = local_candidates + downloaded_candidates
+
+    if not final_candidates:
+        console.print("[yellow]No local files available for conversion.[/yellow]")
+        if icloud_candidates and not skip_icloud and not legacy:
+            console.print(
+                "[dim]All iCloud downloads failed. Check network connection and try again.[/dim]"
+            )
+        sys.exit(1)
 
     if dry_run:
         console.print("[yellow]Dry run mode - no actual conversion will be performed[/yellow]")
@@ -282,7 +336,7 @@ def convert(ctx, quality: str, top_n: int | None, dry_run: bool):
         table.add_column("Size")
         table.add_column("Est. Savings", style="green")
 
-        for candidate in candidates_to_convert:
+        for candidate in final_candidates:
             video = candidate.video
             table.add_row(
                 video.filename[:50],
@@ -302,7 +356,7 @@ def convert(ctx, quality: str, top_n: int | None, dry_run: bool):
         sys.exit(1)
 
     # Execute async conversion
-    _convert_async(ctx, candidates_to_convert, quality, aws_config)
+    _convert_async(ctx, final_candidates, quality, aws_config)
 
 
 # Override convert help text dynamically based on locale
@@ -794,6 +848,7 @@ def config(ctx, output_json: bool):
     console.print(f"  conversion.quality_preset: {all_config['conversion']['quality_preset']}")
     console.print(f"  conversion.max_concurrent: {all_config['conversion']['max_concurrent']}")
     console.print(f"  conversion.staging_folder: {all_config['conversion']['staging_folder']}")
+    console.print(f"  conversion.download_timeout: {all_config['conversion']['download_timeout']}")
     console.print()
 
     console.print("[dim]Use 'vco config set <key> <value>' to change settings[/dim]")
@@ -831,6 +886,127 @@ def config_set(ctx, key: str, value: str):
 
 # Override config_set help text dynamically based on locale
 config_set.help = get_help("config.set.description")
+
+
+def _download_icloud_videos(candidates, timeout: int, skip_confirm: bool) -> list:
+    """Download iCloud videos before conversion.
+
+    Args:
+        candidates: List of ConversionCandidate with iCloud videos
+        timeout: Download timeout in seconds
+        skip_confirm: Skip confirmation prompt
+
+    Returns:
+        List of candidates that were successfully downloaded
+    """
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    from vco.photos.swift_bridge import SwiftBridge
+    from vco.services.icloud_download import (
+        ICloudDownloadService,
+    )
+
+    # Calculate total download size
+    total_size = sum(c.video.file_size for c in candidates)
+
+    # Initialize SwiftBridge
+    try:
+        swift_bridge = SwiftBridge()
+    except Exception as e:
+        console.print(f"[red]Error: Swift bridge unavailable: {e}[/red]")
+        return []
+
+    # Initialize download service
+    download_service = ICloudDownloadService(
+        swift_bridge=swift_bridge,
+        timeout=timeout,
+    )
+
+    # Check disk space
+    has_space, available = download_service.check_disk_space(total_size)
+    if not has_space:
+        console.print()
+        console.print("[red]Error: Insufficient disk space for iCloud downloads.[/red]")
+        console.print(f"  Required: {format_size(total_size * 1.1)}")
+        console.print(f"  Available: {format_size(available)}")
+        return []
+
+    # Show confirmation prompt
+    console.print()
+    console.print(f"[bold]iCloud videos to download: {len(candidates)}[/bold]")
+    console.print(f"  Estimated size: {format_size(total_size)}")
+    console.print(f"  Timeout: {timeout}s per video")
+    console.print()
+
+    if not skip_confirm:
+        if not click.confirm("Download iCloud videos before conversion?"):
+            console.print("[yellow]Skipping iCloud videos.[/yellow]")
+            return []
+
+    # Download with progress display
+    console.print()
+    console.print("[bold]Downloading iCloud videos...[/bold]")
+
+    downloaded_candidates = []
+    failed_downloads = []
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.fields[filename]}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        console=console,
+    )
+
+    with progress:
+        for i, candidate in enumerate(candidates):
+            video = candidate.video
+            task_id = progress.add_task(
+                "download",
+                filename=f"[{i + 1}/{len(candidates)}] {video.filename[:30]}",
+                total=100,
+            )
+
+            # Download
+            result = download_service.download_video(video)
+
+            if result.success:
+                progress.update(task_id, completed=100)
+                console.print(
+                    f"  [green]✓[/green] {video.filename} ({result.download_time_seconds:.1f}s)"
+                )
+                downloaded_candidates.append(candidate)
+            else:
+                progress.update(task_id, completed=100)
+                console.print(f"  [red]✗[/red] {video.filename}: {result.error_message}")
+                failed_downloads.append((video.filename, result.error_message))
+
+            progress.remove_task(task_id)
+
+    # Show summary
+    console.print()
+    console.print("[bold]Download Summary[/bold]")
+    console.print(f"  Successful: [green]{len(downloaded_candidates)}[/green]")
+    console.print(f"  Failed: [red]{len(failed_downloads)}[/red]")
+
+    if failed_downloads:
+        console.print()
+        console.print("[red]Failed downloads:[/red]")
+        for filename, error in failed_downloads[:5]:
+            console.print(f"  - {filename}: {error}")
+        if len(failed_downloads) > 5:
+            console.print(f"  ... and {len(failed_downloads) - 5} more")
+
+    console.print()
+
+    return downloaded_candidates
 
 
 def _convert_async(ctx, candidates, quality: str, aws_config):

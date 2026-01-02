@@ -105,6 +105,15 @@ vco convert --top-n 5
 
 # Dry run (no actual conversion)
 vco convert --dry-run
+
+# Skip iCloud videos (process local only)
+vco convert --skip-icloud
+
+# Set download timeout for iCloud videos (default: 300 seconds)
+vco convert --download-timeout 600
+
+# Skip confirmation prompts
+vco convert --yes
 ```
 
 ### Async Workflow
@@ -218,26 +227,53 @@ Best-effort mode used:
 
 ## iCloud Video Processing
 
-Videos stored only in iCloud (not downloaded locally) cannot be automatically downloaded. This is a limitation of the osxphotos library.
+VCO automatically downloads iCloud-only videos before conversion using the native Swift PhotoKit implementation.
+
+### Automatic Download (Default)
+
+When running `vco convert`, iCloud-only videos are automatically downloaded:
+
+```
+Found 5 iCloud videos (estimated 2.3 GB)
+Downloading iCloud videos...
+  ✓ IMG_1234.mov (500 MB)
+  ✓ IMG_5678.mov (800 MB)
+  ...
+Download complete: 5 succeeded, 0 failed
+```
+
+### Convert Options for iCloud
+
+```bash
+# Skip iCloud videos (process local only)
+vco convert --skip-icloud
+
+# Set download timeout (default: 300 seconds, range: 30-3600)
+vco convert --download-timeout 600
+
+# Skip confirmation prompts for iCloud download
+vco convert --yes
+```
 
 ### Scan Behavior
 
 When running `vco scan`, each video's iCloud status (Local/iCloud) is displayed:
 
 ```
-⚠ 10 videos are in iCloud only and need to be downloaded first.
-Open Photos app and download these videos before running 'vco convert':
+⚠ 10 videos are in iCloud only.
+These will be automatically downloaded when running 'vco convert'.
+Use '--skip-icloud' to skip iCloud videos.
 
   - IMG_1234.mov
   - IMG_5678.mov
   ...
 ```
 
-### Convert Behavior
+### Legacy Mode
 
-When running `vco convert`, only locally available videos are converted. iCloud-only videos are skipped.
+When using `--legacy` option (Python osxphotos implementation), automatic download is not available. iCloud-only videos are skipped with a message.
 
-### Manual Download Steps
+### Manual Download Steps (Legacy Mode Only)
 
 1. Open Photos app
 2. Select iCloud-only videos

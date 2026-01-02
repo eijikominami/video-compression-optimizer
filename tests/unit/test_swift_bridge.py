@@ -34,7 +34,9 @@ class TestSwiftBridgeBinaryDetection:
 
             # Don't provide binary_path to trigger auto-detection
             with patch.object(
-                SwiftBridge, "_find_binary", side_effect=PhotosAccessError("vco-photos binary not found")
+                SwiftBridge,
+                "_find_binary",
+                side_effect=PhotosAccessError("vco-photos binary not found"),
             ):
                 with pytest.raises(PhotosAccessError, match="vco-photos binary not found"):
                     SwiftBridge()

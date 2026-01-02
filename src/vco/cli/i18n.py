@@ -102,6 +102,22 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "実際の変換を行わずにシミュレーション",
         "en": "Simulate without actual conversion",
     },
+    "convert.skip_icloud": {
+        "ja": "iCloud のみの動画をスキップ（ダウンロードしない）",
+        "en": "Skip iCloud-only videos (do not download)",
+    },
+    "convert.download_timeout": {
+        "ja": "iCloud ダウンロードのタイムアウト（秒）",
+        "en": "Timeout for iCloud downloads in seconds",
+    },
+    "convert.yes": {
+        "ja": "確認プロンプトをスキップ",
+        "en": "Skip confirmation prompts",
+    },
+    "convert.legacy": {
+        "ja": "[非推奨] レガシーモード（iCloud 自動ダウンロード無効）",
+        "en": "[Deprecated] Legacy mode (iCloud auto-download disabled)",
+    },
     # import command
     "import.description": {
         "ja": "変換済み動画を Photos ライブラリにインポート\n\n"

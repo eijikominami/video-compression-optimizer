@@ -37,6 +37,14 @@ ENV/
 htmlcov/
 .hypothesis/
 
+# Type checking / Linting
+.mypy_cache/
+.ruff_cache/
+
+# Swift
+swift/.build/
+swift/.swiftpm/
+
 # SAM
 .aws-sam/
 samconfig.toml
