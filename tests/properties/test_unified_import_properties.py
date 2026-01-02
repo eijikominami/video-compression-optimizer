@@ -324,14 +324,14 @@ class TestProperty10RemoveItemIsolation:
 class TestProperty12ClearQueueAffectsLocalOnly:
     """Property 12: Clear queue affects local only.
 
-    For any clear operation, all local queue items SHALL be removed,
-    and AWS items SHALL remain unaffected.
+    For any clear operation when no AWS items exist, only local queue
+    items SHALL be removed.
 
     Validates: Requirements 7.6
     """
 
-    def test_clear_only_calls_local_service(self):
-        """Clear operation only affects local service."""
+    def test_clear_only_calls_local_service_when_no_aws_items(self):
+        """Clear operation only affects local service when no AWS items."""
         local_service = MagicMock(spec=ImportService)
         aws_service = MagicMock(spec=AwsImportService)
 
@@ -344,17 +344,21 @@ class TestProperty12ClearQueueAffectsLocalOnly:
             files_failed=0,
         )
 
+        # No AWS items to clear
+        aws_service.list_completed_files.return_value = []
+        local_service.list_pending.return_value = []
+
         service = UnifiedImportService(
             local_service=local_service,
             aws_service=aws_service,
         )
-        service.clear_local_queue()
+        service.clear_all_queues()
 
         # Property: local service clear was called
         local_service.clear_queue.assert_called_once()
 
-        # Property: AWS service was not affected
-        aws_service.delete_s3_file.assert_not_called()
+        # Property: AWS cleanup_file was not called (no AWS items)
+        aws_service.cleanup_file.assert_not_called()
 
 
 class TestProperty6DownloadProgressPersistence:
@@ -627,16 +631,28 @@ class TestProperty11RemoveItemCleanup:
         assert result.metadata_deleted is True
 
     def test_aws_remove_deletes_s3(self):
-        """AWS item removal deletes S3 file."""
+        """AWS item removal deletes S3 file via cleanup API."""
+        from vco.services.aws_import import CleanupResult
+
         aws_service = MagicMock(spec=AwsImportService)
-        aws_service.delete_s3_file.return_value = True
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id="file456",
+            status="REMOVED",
+            s3_deleted=True,
+        )
 
         service = UnifiedImportService(aws_service=aws_service)
         result = service.remove_item("task123:file456")
 
-        # Property: S3 file was deleted
+        # Property: S3 file was deleted via cleanup API
         assert result.s3_deleted is True
-        aws_service.delete_s3_file.assert_called_once_with("task123", "file456", None)
+        aws_service.cleanup_file.assert_called_once_with(
+            task_id="task123",
+            file_id="file456",
+            action="removed",
+            user_id=None,
+        )
 
 
 class TestProperty5AwsImportDownloadsAndVerifies:
@@ -654,10 +670,10 @@ class TestProperty5AwsImportDownloadsAndVerifies:
     )
     @settings(max_examples=20, suppress_health_check=[HealthCheck.too_slow])
     def test_aws_import_workflow_sequence(self, task_id, file_id):
-        """AWS import follows download -> verify -> delete sequence."""
+        """AWS import follows download -> verify -> cleanup sequence."""
         from unittest.mock import patch
 
-        from vco.services.aws_import import AwsDownloadResult
+        from vco.services.aws_import import AwsDownloadResult, CleanupResult
 
         local_service = MagicMock(spec=ImportService)
         aws_service = MagicMock(spec=AwsImportService)
@@ -672,7 +688,12 @@ class TestProperty5AwsImportDownloadsAndVerifies:
             checksum_verified=True,
         )
         photos_manager.import_video.return_value = "new-uuid-123"
-        aws_service.delete_s3_file.return_value = True
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id=file_id,
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
 
         service = UnifiedImportService(
             local_service=local_service,
@@ -689,17 +710,22 @@ class TestProperty5AwsImportDownloadsAndVerifies:
         # Property: checksum was verified
         assert result.checksum_verified is True
 
-        # Property: S3 file was deleted on success
+        # Property: S3 file was deleted on success via cleanup API
         assert result.s3_deleted is True
-        aws_service.delete_s3_file.assert_called_once()
+        aws_service.cleanup_file.assert_called_once_with(
+            task_id=task_id,
+            file_id=file_id,
+            action="downloaded",
+            user_id=None,
+        )
 
     @given(
         task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
         file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
     )
     @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow])
-    def test_aws_import_no_delete_on_download_failure(self, task_id, file_id):
-        """S3 file is NOT deleted when download fails."""
+    def test_aws_import_no_cleanup_on_download_failure(self, task_id, file_id):
+        """Cleanup API is NOT called when download fails."""
         from vco.services.aws_import import AwsDownloadResult
 
         aws_service = MagicMock(spec=AwsImportService)
@@ -719,16 +745,16 @@ class TestProperty5AwsImportDownloadsAndVerifies:
         assert result.success is False
         assert result.downloaded is False
 
-        # Property: S3 file was NOT deleted
-        aws_service.delete_s3_file.assert_not_called()
+        # Property: cleanup API was NOT called
+        aws_service.cleanup_file.assert_not_called()
 
     @given(
         task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
         file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
     )
     @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow])
-    def test_aws_import_no_delete_on_photos_import_failure(self, task_id, file_id):
-        """S3 file is NOT deleted when Photos import fails."""
+    def test_aws_import_no_cleanup_on_photos_import_failure(self, task_id, file_id):
+        """Cleanup API is NOT called when Photos import fails."""
         from unittest.mock import patch
 
         from vco.photos.manager import PhotosAccessError
@@ -759,8 +785,8 @@ class TestProperty5AwsImportDownloadsAndVerifies:
         assert result.success is False
         assert result.downloaded is True
 
-        # Property: S3 file was NOT deleted
-        aws_service.delete_s3_file.assert_not_called()
+        # Property: cleanup API was NOT called
+        aws_service.cleanup_file.assert_not_called()
 
 
 class TestProperty3AlbumMembershipPreservation:

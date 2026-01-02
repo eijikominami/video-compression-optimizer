@@ -430,6 +430,8 @@ Resources:
           S3_BUCKET: !Ref VideoStorageBucket
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           QUALITY_CHECKER_ARN: !GetAtt QualityCheckerFunction.Arn
+          # Pre-configured MediaConvert endpoint to avoid rate limiting during parallel processing
+          MEDIACONVERT_ENDPOINT: 'https://mediaconvert.ap-northeast-1.amazonaws.com'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AsyncTasksTable

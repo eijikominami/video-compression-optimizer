@@ -11,7 +11,7 @@ import json
 import uuid
 from datetime import datetime, timedelta
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from vco.models.async_task import (
@@ -49,7 +49,7 @@ def async_file_strategy(draw):
     """Generate a valid AsyncFile."""
     return AsyncFile(
         file_id=draw(uuid_strategy),
-        original_uuid=draw(uuid_strategy),
+        uuid=draw(uuid_strategy),
         filename=draw(filename_strategy),
         source_s3_key=draw(s3_key_strategy),
         output_s3_key=draw(st.one_of(st.none(), s3_key_strategy)),
@@ -145,7 +145,7 @@ class TestAsyncFileRoundtrip:
     # **Validates: Requirements 6.1, 6.2**
 
     @given(file=async_file_strategy())
-    @settings(max_examples=100)
+    @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     def test_async_file_dict_roundtrip(self, file: AsyncFile):
         """AsyncFile should survive dict serialization roundtrip."""
         # Convert to dict and back
@@ -383,7 +383,7 @@ class TestAsyncTaskProgressCalculation:
             files.append(
                 AsyncFile(
                     file_id=f"file-{i}",
-                    original_uuid=f"uuid-{i}",
+                    uuid=f"uuid-{i}",
                     filename=f"video-{i}.mp4",
                     source_s3_key=f"source/{i}.mp4",
                     status=status,

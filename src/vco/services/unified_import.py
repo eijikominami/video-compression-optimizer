@@ -389,6 +389,22 @@ class UnifiedImportService:
                     download_resumed=download_result.download_resumed,
                     checksum_verified=download_result.checksum_verified,
                 )
+
+            # Load metadata and add to albums if available
+            albums: list[str] = []
+            if download_result.metadata_path and download_result.metadata_path.exists():
+                try:
+                    import json
+
+                    with open(download_result.metadata_path) as f:
+                        metadata_dict = json.load(f)
+                    metadata = VideoMetadata.from_dict(metadata_dict)
+                    if metadata and metadata.albums:
+                        albums = metadata.albums
+                        self.photos_manager.add_to_albums(new_uuid, albums)
+                except Exception as e:
+                    logger.warning(f"Failed to load metadata or add to albums: {e}")
+
         except PhotosAccessError as e:
             return UnifiedImportResult(
                 success=False,
@@ -420,13 +436,22 @@ class UnifiedImportService:
         except Exception as e:
             logger.warning(f"Failed to delete local file {local_path}: {e}")
 
+        # Clean up metadata file if downloaded
+        if download_result.metadata_path and download_result.metadata_path.exists():
+            try:
+                download_result.metadata_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete metadata file {download_result.metadata_path}: {e}"
+                )
+
         return UnifiedImportResult(
             success=True,
             item_id=item_id,
             source="aws",
             original_filename="",  # Not available from AWS
             converted_filename=local_path.name,
-            albums=[],  # Albums not available from AWS
+            albums=albums,
             downloaded=True,
             download_resumed=download_result.download_resumed,
             checksum_verified=download_result.checksum_verified,

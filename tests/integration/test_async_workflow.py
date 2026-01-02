@@ -122,7 +122,7 @@ class TestAsyncTaskDynamoDB:
             files=[
                 AsyncFile(
                     file_id=str(uuid.uuid4()),
-                    original_uuid="photo-uuid-1",
+                    uuid="photo-uuid-1",
                     filename="video1.mp4",
                     source_s3_key=f"async/{task_id}/input/video1.mp4",
                     status=FileStatus.PENDING,
@@ -403,7 +403,7 @@ class TestTaskStatusAggregation:
         files = [
             AsyncFile(
                 file_id=str(uuid.uuid4()),
-                original_uuid=f"uuid-{i}",
+                uuid=f"uuid-{i}",
                 filename=f"video{i}.mp4",
                 source_s3_key=f"async/{task_id}/input/video{i}.mp4",
                 status=FileStatus.COMPLETED,
@@ -435,7 +435,7 @@ class TestTaskStatusAggregation:
         files = [
             AsyncFile(
                 file_id=str(uuid.uuid4()),
-                original_uuid="uuid-1",
+                uuid="uuid-1",
                 filename="video1.mp4",
                 source_s3_key=f"async/{task_id}/input/video1.mp4",
                 status=FileStatus.COMPLETED,
@@ -443,7 +443,7 @@ class TestTaskStatusAggregation:
             ),
             AsyncFile(
                 file_id=str(uuid.uuid4()),
-                original_uuid="uuid-2",
+                uuid="uuid-2",
                 filename="video2.mp4",
                 source_s3_key=f"async/{task_id}/input/video2.mp4",
                 status=FileStatus.FAILED,
@@ -475,7 +475,7 @@ class TestTaskStatusAggregation:
         files = [
             AsyncFile(
                 file_id=str(uuid.uuid4()),
-                original_uuid=f"uuid-{i}",
+                uuid=f"uuid-{i}",
                 filename=f"video{i}.mp4",
                 source_s3_key=f"async/{task_id}/input/video{i}.mp4",
                 status=FileStatus.FAILED,
@@ -519,7 +519,7 @@ class TestEndToEndWorkflow:
             files=[
                 AsyncFile(
                     file_id=file_id,
-                    original_uuid="photo-uuid-1",
+                    uuid="photo-uuid-1",
                     filename="video.mp4",
                     source_s3_key=f"async/{task_id}/input/{file_id}/video.mp4",
                     status=FileStatus.PENDING,
@@ -601,7 +601,7 @@ class TestEndToEndWorkflow:
             files=[
                 AsyncFile(
                     file_id=file_id,
-                    original_uuid="photo-uuid-1",
+                    uuid="photo-uuid-1",
                     filename="video.mp4",
                     source_s3_key=f"async/{task_id}/input/{file_id}/video.mp4",
                     status=FileStatus.CONVERTING,

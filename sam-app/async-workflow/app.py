@@ -17,12 +17,17 @@ Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
+
+# Lambda global variable for endpoint caching (warm start optimization)
+_mediaconvert_endpoint: str | None = None
 
 
 def convert_floats_to_decimal(obj: Any) -> Any:
@@ -49,6 +54,7 @@ DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "")
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
 MEDIACONVERT_ROLE_ARN = os.environ.get("MEDIACONVERT_ROLE_ARN", "")
 QUALITY_CHECKER_ARN = os.environ.get("QUALITY_CHECKER_ARN", "")
+MEDIACONVERT_ENDPOINT = os.environ.get("MEDIACONVERT_ENDPOINT", "")
 
 # MediaConvert error codes
 TRANSIENT_ERRORS = {1517, 1522, 1550, 1999}
@@ -64,12 +70,66 @@ def get_dynamodb_table():
     return dynamodb.Table(DYNAMODB_TABLE)
 
 
-def get_mediaconvert_client():
-    """Get MediaConvert client with endpoint."""
+def _fetch_endpoint_with_retry(max_retries: int = 3) -> str:
+    """Fetch MediaConvert endpoint with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retries (default: 3)
+
+    Returns:
+        MediaConvert endpoint URL
+
+    Raises:
+        ClientError: If all retries fail
+    """
     mc = boto3.client("mediaconvert")
-    endpoints = mc.describe_endpoints()
-    endpoint_url = endpoints["Endpoints"][0]["Url"]
-    return boto3.client("mediaconvert", endpoint_url=endpoint_url)
+
+    for attempt in range(max_retries + 1):
+        try:
+            endpoints = mc.describe_endpoints()
+            return endpoints["Endpoints"][0]["Url"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "TooManyRequestsException":
+                if attempt < max_retries:
+                    # Exponential backoff: 1s, 2s, 4s
+                    wait_time = 2**attempt
+                    logger.warning(
+                        f"DescribeEndpoints rate limited, retrying in {wait_time}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(wait_time)
+                    continue
+            raise
+
+    # Should not reach here, but just in case
+    raise RuntimeError("Failed to fetch MediaConvert endpoint after retries")
+
+
+def get_mediaconvert_client():
+    """Get MediaConvert client with cached endpoint.
+
+    Endpoint retrieval priority:
+    1. Lambda global variable (warm start)
+    2. Environment variable MEDIACONVERT_ENDPOINT (set in SAM template)
+    3. DescribeEndpoints API (fallback with exponential backoff)
+    """
+    global _mediaconvert_endpoint
+
+    # 1. Use cached endpoint from global variable
+    if _mediaconvert_endpoint:
+        return boto3.client("mediaconvert", endpoint_url=_mediaconvert_endpoint)
+
+    # 2. Get from environment variable
+    if MEDIACONVERT_ENDPOINT:
+        _mediaconvert_endpoint = MEDIACONVERT_ENDPOINT
+        logger.info(f"Using MediaConvert endpoint from environment: {_mediaconvert_endpoint}")
+        return boto3.client("mediaconvert", endpoint_url=_mediaconvert_endpoint)
+
+    # 3. Fetch from API with retry (fallback)
+    logger.info("Fetching MediaConvert endpoint from API")
+    _mediaconvert_endpoint = _fetch_endpoint_with_retry()
+    logger.info(f"Cached MediaConvert endpoint: {_mediaconvert_endpoint}")
+    return boto3.client("mediaconvert", endpoint_url=_mediaconvert_endpoint)
 
 
 def validate_input(event: dict) -> dict:

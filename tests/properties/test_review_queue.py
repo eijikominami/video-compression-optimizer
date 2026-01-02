@@ -12,8 +12,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from vco.metadata.manager import VideoMetadata
+from vco.models.types import BatchConversionResult, ConversionResult
 from vco.quality.checker import QualityResult
-from vco.services.convert import BatchConversionResult, ConversionResult
 from vco.services.review import ReviewService
 
 
