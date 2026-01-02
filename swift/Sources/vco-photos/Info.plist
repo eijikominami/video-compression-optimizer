@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.vco.photos</string>
+    <key>CFBundleName</key>
+    <string>vco-photos</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>vco-photos needs access to your Photos library to scan, import, and manage videos.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>vco-photos needs permission to add videos to your Photos library.</string>
+</dict>
+</plist>

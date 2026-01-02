@@ -429,7 +429,7 @@ class PhotosAccessManager:
             if album_name:
                 self._add_to_album_by_name(imported_photo, album_name)
 
-            return imported_photo.uuid
+            return str(imported_photo.uuid)
 
         except ImportError:
             raise PhotosAccessError(

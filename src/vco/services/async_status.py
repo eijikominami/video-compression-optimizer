@@ -11,6 +11,7 @@ Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 import boto3
 
@@ -245,9 +246,9 @@ class StatusCommand:
         self,
         method: str,
         path: str,
-        params: dict | None = None,
-        body: dict | None = None,
-    ) -> dict:
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Call API Gateway with AWS Signature V4.
 
         Args:
@@ -259,8 +260,8 @@ class StatusCommand:
         Returns:
             API response as dict
         """
-        import requests
-        from requests_aws4auth import AWS4Auth
+        import requests  # type: ignore[import-untyped]
+        from requests_aws4auth import AWS4Auth  # type: ignore[import-untyped]
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
@@ -296,7 +297,8 @@ class StatusCommand:
         )
         response.raise_for_status()
 
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     def update_file_status_to_downloaded(
         self,

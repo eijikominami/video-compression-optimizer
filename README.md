@@ -10,6 +10,7 @@ A tool to convert videos in Apple Photos to H.265 format to save storage space.
 ## Features
 
 - Automatic scanning of Apple Photos library videos
+- Native Swift PhotoKit implementation for fast, reliable Photos access
 - High-quality H.265 conversion using AWS MediaConvert
 - SSIM-based quality verification
 - Metadata preservation (capture date, location, albums)
@@ -178,6 +179,18 @@ vco config set conversion.quality_preset balanced
 vco config set conversion.max_concurrent 3
 ```
 
+### Legacy Mode
+
+VCO uses a native Swift implementation for Photos library access by default. If you encounter issues, you can fall back to the legacy Python implementation:
+
+```bash
+# Use legacy Python implementation
+vco scan --legacy
+vco convert --legacy
+```
+
+Note: The `--legacy` option is deprecated and will be removed in a future version.
+
 ## Quality Presets
 
 | Preset | QVBR | Use Case |
@@ -281,11 +294,30 @@ The CLI automatically detects your system locale:
 
 ## Development
 
+### Building Swift Binary
+
+For development, you can build the Swift binary manually:
+
+```bash
+cd swift
+
+# Build for current architecture
+swift build
+
+# Build Universal Binary (arm64 + x86_64)
+./scripts/build_swift.sh
+```
+
+The built binary is placed in `bin/vco-photos`.
+
 ### Running Tests
 
 ```bash
-# All tests
+# All Python tests
 python3.11 -m pytest tests/ -v
+
+# Swift tests
+cd swift && swift test
 
 # Property tests
 python3.11 -m pytest tests/properties/ -v

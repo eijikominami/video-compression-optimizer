@@ -77,6 +77,10 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "JSON形式で出力",
         "en": "Output in JSON format",
     },
+    "scan.legacy": {
+        "ja": "[非推奨] レガシー Python 実装を使用",
+        "en": "[Deprecated] Use legacy Python implementation",
+    },
     # convert command
     "convert.description": {
         "ja": "変換候補の動画を H.265 に変換\n\n"

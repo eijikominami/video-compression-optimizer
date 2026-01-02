@@ -105,7 +105,7 @@ class MediaConvertClient:
         """Get the MediaConvert endpoint URL for the region."""
         client = self.session.client("mediaconvert", region_name=self.region)
         response = client.describe_endpoints()
-        return response["Endpoints"][0]["Url"]
+        return str(response["Endpoints"][0]["Url"])
 
     def upload_to_s3(self, local_path: Path, s3_key: str) -> str:
         """Upload a file to S3.

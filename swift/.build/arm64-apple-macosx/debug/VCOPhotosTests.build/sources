@@ -1,0 +1,12 @@
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/AddToAlbumsCommandTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/CommandRequestTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/CommandResponseTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/DateFormattingTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/DeleteCommandTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/DownloadCommandTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/ErrorInfoTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/ExportCommandTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/ImportCommandTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/JSONCodingTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/ScanCommandTests.swift
+/Users/kominami/Documents/Code/video-compression-optimizer/swift/Tests/VCOPhotosTests/VideoInfoTests.swift

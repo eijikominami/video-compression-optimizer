@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import boto3
 from botocore.config import Config
@@ -353,8 +354,8 @@ class AsyncConvertCommand:
         task_id: str,
         user_id: str,
         quality_preset: str,
-        files: list[dict],
-    ) -> dict:
+        files: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Submit task to API Gateway.
 
         Args:
@@ -366,8 +367,8 @@ class AsyncConvertCommand:
         Returns:
             API response
         """
-        import requests
-        from requests_aws4auth import AWS4Auth
+        import requests  # type: ignore[import-untyped]
+        from requests_aws4auth import AWS4Auth  # type: ignore[import-untyped]
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
@@ -392,7 +393,8 @@ class AsyncConvertCommand:
         response = requests.post(url, json=body, auth=auth, timeout=30)
         response.raise_for_status()
 
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     def _cleanup_task_files(self, task_id: str) -> None:
         """Clean up uploaded files for a failed task.

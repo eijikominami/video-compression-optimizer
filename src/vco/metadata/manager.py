@@ -12,6 +12,7 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -308,7 +309,7 @@ class MetadataManager:
         except Exception:
             return None
 
-    def _run_ffprobe(self, video_path: Path) -> dict:
+    def _run_ffprobe(self, video_path: Path) -> dict[str, Any]:
         """Run FFprobe to get video metadata.
 
         Args:
@@ -333,7 +334,8 @@ class MetadataManager:
         if result.returncode != 0:
             raise RuntimeError(f"FFprobe failed: {result.stderr}")
 
-        return json.loads(result.stdout)
+        data: dict[str, Any] = json.loads(result.stdout)
+        return data
 
     def _parse_date(self, date_str: str) -> datetime:
         """Parse date string from various formats.

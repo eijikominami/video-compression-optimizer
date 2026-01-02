@@ -1,0 +1,3 @@
+module VCOPhotosLib {
+    header "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/include/VCOPhotosLib-Swift.h"
+}

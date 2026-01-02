@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photos.build/master.swiftdeps"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/vco-photos/main.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photos.build/main.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photos.build/main.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photos.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photos.build/main.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photos.build/main.dia"
+  }
+}

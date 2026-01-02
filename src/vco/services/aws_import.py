@@ -525,7 +525,7 @@ class AwsImportService:
 
         try:
             import boto3
-            import requests
+            import requests  # type: ignore[import-untyped]
             from botocore.auth import SigV4Auth
             from botocore.awsrequest import AWSRequest
 
