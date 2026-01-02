@@ -208,6 +208,17 @@ class VideoMetadata:
     description: str | None = None
     location: tuple[float, float] | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "capture_date": self.capture_date.isoformat() if self.capture_date else None,
+            "creation_date": self.creation_date.isoformat() if self.creation_date else None,
+            "albums": self.albums,
+            "title": self.title,
+            "description": self.description,
+            "location": list(self.location) if self.location else None,
+        }
+
 
 @dataclass
 class ConversionJob:

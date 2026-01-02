@@ -1,0 +1,131 @@
+{
+  "": {
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/master.swiftdeps"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Commands/AddToAlbumsCommand.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/AddToAlbumsCommand.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/AddToAlbumsCommand.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/AddToAlbumsCommand~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/AddToAlbumsCommand.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/AddToAlbumsCommand.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Commands/DeleteCommand.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DeleteCommand.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DeleteCommand.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DeleteCommand~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DeleteCommand.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DeleteCommand.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Commands/DownloadCommand.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DownloadCommand.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DownloadCommand.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DownloadCommand~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DownloadCommand.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DownloadCommand.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Commands/ExportCommand.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ExportCommand.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ExportCommand.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ExportCommand~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ExportCommand.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ExportCommand.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Commands/ImportCommand.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ImportCommand.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ImportCommand.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ImportCommand~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ImportCommand.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ImportCommand.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Commands/ScanCommand.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ScanCommand.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ScanCommand.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ScanCommand~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ScanCommand.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ScanCommand.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Models/CommandRequest.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandRequest.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandRequest.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandRequest~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandRequest.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandRequest.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Models/CommandResponse.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandResponse.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandResponse.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandResponse~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandResponse.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/CommandResponse.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Models/ErrorInfo.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ErrorInfo.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ErrorInfo.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ErrorInfo~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ErrorInfo.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ErrorInfo.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Models/VideoInfo.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoInfo.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoInfo.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoInfo~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoInfo.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoInfo.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Services/ICloudDownloader.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ICloudDownloader.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ICloudDownloader.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ICloudDownloader~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ICloudDownloader.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/ICloudDownloader.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Services/MetadataExtractor.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/MetadataExtractor.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/MetadataExtractor.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/MetadataExtractor~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/MetadataExtractor.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/MetadataExtractor.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Services/PhotosManager.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/PhotosManager.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/PhotosManager.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/PhotosManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/PhotosManager.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/PhotosManager.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Services/VideoDeleter.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoDeleter.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoDeleter.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoDeleter~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoDeleter.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoDeleter.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Services/VideoExporter.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoExporter.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoExporter.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoExporter~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoExporter.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoExporter.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Services/VideoImporter.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoImporter.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoImporter.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoImporter~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoImporter.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/VideoImporter.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Utils/DateFormatting.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DateFormatting.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DateFormatting.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DateFormatting~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DateFormatting.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/DateFormatting.dia"
+  },
+  "/Users/kominami/Documents/Code/video-compression-optimizer/swift/Sources/VCOPhotosLib/Utils/JSONCoding.swift": {
+    "dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/JSONCoding.d",
+    "object": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/JSONCoding.swift.o",
+    "swiftmodule": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/JSONCoding~partial.swiftmodule",
+    "swift-dependencies": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/JSONCoding.swiftdeps",
+    "diagnostics": "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/VCOPhotosLib.build/JSONCoding.dia"
+  }
+}

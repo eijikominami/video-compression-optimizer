@@ -51,6 +51,9 @@ vco = "vco.cli.main:cli"
 [tool.hatch.build.targets.wheel]
 packages = ["src/vco"]
 
+[tool.hatch.build.targets.wheel.shared-data]
+"bin/vco-photos" = "bin/vco-photos"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

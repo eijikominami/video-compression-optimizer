@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Swift Native PhotoKit 実装**
+  - Photos ライブラリアクセスを Python (osxphotos) から Swift (PhotoKit) に移行
+  - パフォーマンス向上: ネイティブ API による高速スキャン
+  - Universal Binary (arm64 + x86_64) 対応
+  - `--legacy` オプションで従来の Python 実装にフォールバック可能
+  - Swift バイナリは `bin/vco-photos` としてパッケージに同梱
+
 ### Changed
 
 - **非同期モードがデフォルトに**

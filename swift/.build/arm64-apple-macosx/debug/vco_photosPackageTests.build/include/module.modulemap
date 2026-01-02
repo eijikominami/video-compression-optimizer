@@ -1,0 +1,3 @@
+module vco_photosPackageTests {
+    header "/Users/kominami/Documents/Code/video-compression-optimizer/swift/.build/arm64-apple-macosx/debug/vco_photosPackageTests.build/include/vco-photosPackageTests-Swift.h"
+}

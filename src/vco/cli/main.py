@@ -28,13 +28,14 @@ from vco.services.scan import ScanService
 console = Console()
 
 
-def format_size(size_bytes: int) -> str:
+def format_size(size_bytes: int | float) -> str:
     """Format bytes as human-readable size."""
+    size_float = float(size_bytes)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if abs(size_bytes) < 1024.0:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024.0
-    return f"{size_bytes:.1f} PB"
+        if abs(size_float) < 1024.0:
+            return f"{size_float:.1f} {unit}"
+        size_float /= 1024.0
+    return f"{size_float:.1f} PB"
 
 
 def format_duration(seconds: float) -> str:
@@ -75,8 +76,16 @@ cli.help = get_help("cli.description")
 @click.option("--to", "to_date", type=str, help=get_help("scan.to_date"))
 @click.option("--top-n", type=int, help=get_help("scan.top_n"))
 @click.option("--json", "output_json", is_flag=True, help=get_help("scan.json"))
+@click.option("--legacy", is_flag=True, help=get_help("scan.legacy"))
 @click.pass_context
-def scan(ctx, from_date: str | None, to_date: str | None, top_n: int | None, output_json: bool):
+def scan(
+    ctx,
+    from_date: str | None,
+    to_date: str | None,
+    top_n: int | None,
+    output_json: bool,
+    legacy: bool,
+):
     """Scan Apple Photos library and display conversion candidates."""
     config = ctx.obj["config"]
 
@@ -84,8 +93,29 @@ def scan(ctx, from_date: str | None, to_date: str | None, top_n: int | None, out
     from_dt = parse_date(from_date) if from_date else None
     to_dt = parse_date(to_date) if to_date else None
 
-    # Initialize services
-    photos_manager = PhotosAccessManager()
+    # Initialize services - use Swift by default, legacy Python if --legacy
+    photos_manager: PhotosAccessManager
+    if legacy:
+        # Show deprecation warning to stderr
+        click.echo(
+            "⚠ --legacy mode is deprecated and will be removed in a future version.",
+            err=True,
+        )
+        photos_manager = PhotosAccessManager()
+    else:
+        # Use Swift implementation
+        try:
+            from vco.photos.swift_bridge import SwiftBridge
+
+            photos_manager = SwiftBridge()  # type: ignore[assignment]
+        except Exception as e:
+            # Fall back to legacy if Swift binary not available
+            click.echo(
+                f"⚠ Swift implementation unavailable ({e}), falling back to legacy mode.",
+                err=True,
+            )
+            photos_manager = PhotosAccessManager()
+
     analyzer = CompressionAnalyzer()
     scan_service = ScanService(photos_manager=photos_manager, analyzer=analyzer)
 
@@ -377,29 +407,27 @@ def import_cmd(
 
     # --remove mode
     if remove_id:
-        result = unified_service.remove_item(remove_id)
-        if result.success:
-            source_label = "AWS" if result.source == "aws" else "local"
+        remove_result = unified_service.remove_item(remove_id)
+        if remove_result.success:
+            source_label = "AWS" if remove_result.source == "aws" else "local"
             console.print(f"[green]✓ Removed {remove_id} ({source_label}).[/green]")
 
-            if result.source == "local":
+            if remove_result.source == "local":
                 file_status = []
-                if result.file_deleted:
+                if remove_result.file_deleted:
                     file_status.append("video file")
-                if result.metadata_deleted:
+                if remove_result.metadata_deleted:
                     file_status.append("metadata file")
 
                 if file_status:
                     console.print(f"[green]✓ Deleted {', '.join(file_status)}.[/green]")
-            elif result.source == "aws":
-                if result.s3_deleted:
+            elif remove_result.source == "aws":
+                if remove_result.s3_deleted:
                     console.print("[green]✓ Deleted S3 file.[/green]")
                 else:
                     console.print("[yellow]⚠ Failed to delete S3 file.[/yellow]")
-            elif result.source == "aws" and result.s3_deleted:
-                console.print("[green]✓ Deleted S3 file.[/green]")
         else:
-            console.print(f"[red]✗ Failed to remove: {result.error_message}[/red]")
+            console.print(f"[red]✗ Failed to remove: {remove_result.error_message}[/red]")
             sys.exit(1)
         return
 
@@ -535,19 +563,19 @@ def import_cmd(
         console.print()
         console.print("[bold]Importing...[/bold]")
 
-        result = unified_service.import_all()
+        batch_result = unified_service.import_all()
 
         if output_json:
             click.echo(
                 json.dumps(
                     {
-                        "total": result.total,
-                        "successful": result.successful,
-                        "failed": result.failed,
-                        "local_total": result.local_total,
-                        "local_successful": result.local_successful,
-                        "aws_total": result.aws_total,
-                        "aws_successful": result.aws_successful,
+                        "total": batch_result.total,
+                        "successful": batch_result.successful,
+                        "failed": batch_result.failed,
+                        "local_total": batch_result.local_total,
+                        "local_successful": batch_result.local_successful,
+                        "aws_total": batch_result.aws_total,
+                        "aws_successful": batch_result.aws_successful,
                         "results": [
                             {
                                 "success": r.success,
@@ -560,7 +588,7 @@ def import_cmd(
                                 "downloaded": r.downloaded,
                                 "s3_deleted": r.s3_deleted,
                             }
-                            for r in result.results
+                            for r in batch_result.results
                         ],
                     },
                     indent=2,
@@ -570,27 +598,31 @@ def import_cmd(
 
         console.print()
         console.print("[bold]Import Complete[/bold]")
-        console.print(f"  Total: {result.total}")
-        console.print(f"  Successful: [green]{result.successful}[/green]")
-        console.print(f"  Failed: [red]{result.failed}[/red]")
+        console.print(f"  Total: {batch_result.total}")
+        console.print(f"  Successful: [green]{batch_result.successful}[/green]")
+        console.print(f"  Failed: [red]{batch_result.failed}[/red]")
 
-        if result.local_total > 0 or result.aws_total > 0:
+        if batch_result.local_total > 0 or batch_result.aws_total > 0:
             console.print()
             console.print("[dim]Breakdown:[/dim]")
-            if result.local_total > 0:
-                console.print(f"  Local: {result.local_successful}/{result.local_total} successful")
-            if result.aws_total > 0:
-                console.print(f"  AWS: {result.aws_successful}/{result.aws_total} successful")
+            if batch_result.local_total > 0:
+                console.print(
+                    f"  Local: {batch_result.local_successful}/{batch_result.local_total} successful"
+                )
+            if batch_result.aws_total > 0:
+                console.print(
+                    f"  AWS: {batch_result.aws_successful}/{batch_result.aws_total} successful"
+                )
 
-        if result.failed > 0:
+        if batch_result.failed > 0:
             console.print()
             console.print("[red]Errors:[/red]")
-            for r in result.results:
+            for r in batch_result.results:
                 if not r.success:
                     source_label = f"[{r.source}]"
                     console.print(f"  - {source_label} {r.converted_filename}: {r.error_message}")
 
-        if result.successful > 0:
+        if batch_result.successful > 0:
             console.print()
             console.print("[yellow]⚠ Manually delete original videos in Photos app.[/yellow]")
 
@@ -657,21 +689,25 @@ def import_cmd(
                     download_task = progress.add_task(f"Downloading {filename}", total=total)
                 progress.update(download_task, completed=downloaded)
 
-            result = unified_service.import_item(item_id, progress_callback=progress_callback)
+            import_result = unified_service.import_item(
+                item_id, progress_callback=progress_callback
+            )
     else:
         # Local item - get info first
-        item = local_service.review_service.get_review_by_id(item_id)
-        if item is None:
+        review_item = local_service.review_service.get_review_by_id(item_id)
+        if review_item is None:
             console.print(f"[red]Error: ID not found: {item_id}[/red]")
             sys.exit(1)
 
-        if item.status != "pending_review":
-            console.print(f"[yellow]This item has already been processed: {item.status}[/yellow]")
+        if review_item.status != "pending_review":
+            console.print(
+                f"[yellow]This item has already been processed: {review_item.status}[/yellow]"
+            )
             sys.exit(1)
 
-        albums = item.metadata.get("albums", [])
+        albums = review_item.metadata.get("albums", [])
 
-        console.print(f"[bold]Import: {item.converted_path.name}[/bold]")
+        console.print(f"[bold]Import: {review_item.converted_path.name}[/bold]")
         console.print()
         console.print("Actions:")
         console.print("  1. Import converted video to Photos")
@@ -687,40 +723,40 @@ def import_cmd(
             console.print("Cancelled.")
             return
 
-        result = unified_service.import_item(item_id)
+        import_result = unified_service.import_item(item_id)
 
     if output_json:
         click.echo(
             json.dumps(
                 {
-                    "success": result.success,
-                    "item_id": result.item_id,
-                    "source": result.source,
-                    "original_filename": result.original_filename,
-                    "converted_filename": result.converted_filename,
-                    "albums": result.albums,
-                    "error_message": result.error_message,
-                    "downloaded": result.downloaded,
-                    "s3_deleted": result.s3_deleted,
+                    "success": import_result.success,
+                    "item_id": import_result.item_id,
+                    "source": import_result.source,
+                    "original_filename": import_result.original_filename,
+                    "converted_filename": import_result.converted_filename,
+                    "albums": import_result.albums,
+                    "error_message": import_result.error_message,
+                    "downloaded": import_result.downloaded,
+                    "s3_deleted": import_result.s3_deleted,
                 },
                 indent=2,
             )
         )
         return
 
-    if result.success:
+    if import_result.success:
         console.print("[green]✓ Import to Photos completed[/green]")
-        if result.source == "aws":
-            if result.downloaded:
+        if import_result.source == "aws":
+            if import_result.downloaded:
                 console.print("[green]✓ Downloaded from S3[/green]")
-            if result.s3_deleted:
+            if import_result.s3_deleted:
                 console.print("[green]✓ S3 file deleted[/green]")
-        if result.albums:
-            console.print(f"[green]✓ Added to albums: {', '.join(result.albums)}[/green]")
+        if import_result.albums:
+            console.print(f"[green]✓ Added to albums: {', '.join(import_result.albums)}[/green]")
         console.print()
         console.print("[yellow]⚠ Manually delete original video in Photos app.[/yellow]")
     else:
-        console.print(f"[red]✗ Import failed: {result.error_message}[/red]")
+        console.print(f"[red]✗ Import failed: {import_result.error_message}[/red]")
         sys.exit(1)
 
 
@@ -777,16 +813,17 @@ def config_set(ctx, key: str, value: str):
 
     try:
         # Convert value types
+        converted_value: str | bool | int = value
         if value.lower() == "true":
-            value = True
+            converted_value = True
         elif value.lower() == "false":
-            value = False
+            converted_value = False
         elif value.isdigit():
-            value = int(value)
+            converted_value = int(value)
 
-        config_manager.set(key, value)
+        config_manager.set(key, converted_value)
         config_manager.save()
-        console.print(f"[green]✓ Set {key} = {value}[/green]")
+        console.print(f"[green]✓ Set {key} = {converted_value}[/green]")
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)

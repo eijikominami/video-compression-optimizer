@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class DownloadProgressStore:
     def _save(self) -> None:
         """Save progress data to file."""
         try:
-            data = {}
+            data: dict[str, dict[str, Any]] = {}
             for task_id, files in self._progress_data.items():
                 data[task_id] = {}
                 for file_id, progress in files.items():

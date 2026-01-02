@@ -10,6 +10,7 @@ Requirements: 3.1, 3.2, 3.3, 3.4, 3.5
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import boto3
 
@@ -107,9 +108,9 @@ class CancelCommand:
         self,
         method: str,
         path: str,
-        params: dict | None = None,
-        body: dict | None = None,
-    ) -> dict:
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Call API Gateway with AWS Signature V4.
 
         Args:
@@ -121,8 +122,8 @@ class CancelCommand:
         Returns:
             API response as dict
         """
-        import requests
-        from requests_aws4auth import AWS4Auth
+        import requests  # type: ignore[import-untyped]
+        from requests_aws4auth import AWS4Auth  # type: ignore[import-untyped]
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
@@ -157,7 +158,8 @@ class CancelCommand:
         )
         response.raise_for_status()
 
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     def _get_machine_id(self) -> str:
         """Get machine identifier for user_id.
