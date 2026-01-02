@@ -60,7 +60,7 @@ class TestCompletedFileInvariant:
         # Create a COMPLETED file with output_s3_key
         file = AsyncFile(
             file_id=file_id,
-            original_uuid=original_uuid,
+            uuid=original_uuid,
             filename=filename,
             source_s3_key=source_s3_key,
             output_s3_key=output_s3_key,
@@ -89,7 +89,7 @@ class TestCompletedFileInvariant:
         """PENDING files may have no output_s3_key (contrast with COMPLETED)."""
         file = AsyncFile(
             file_id=file_id,
-            original_uuid=original_uuid,
+            uuid=original_uuid,
             filename=filename,
             source_s3_key=source_s3_key,
             output_s3_key=None,  # No output key yet
@@ -117,7 +117,7 @@ class TestCompletedFileInvariant:
         """CONVERTING files may have no output_s3_key."""
         file = AsyncFile(
             file_id=file_id,
-            original_uuid=original_uuid,
+            uuid=original_uuid,
             filename=filename,
             source_s3_key=source_s3_key,
             output_s3_key=None,
@@ -136,7 +136,7 @@ class TestOutputKeyValidation:
         """COMPLETED file with output_s3_key passes validation."""
         file = AsyncFile(
             file_id="test-file-id",
-            original_uuid="test-uuid",
+            uuid="test-uuid",
             filename="video.mov",
             source_s3_key="tasks/task-1/source/file-1/video.mov",
             output_s3_key="output/task-1/file-1/video_h265.mp4",
@@ -151,7 +151,7 @@ class TestOutputKeyValidation:
         """COMPLETED file without output_s3_key fails validation."""
         file = AsyncFile(
             file_id="test-file-id",
-            original_uuid="test-uuid",
+            uuid="test-uuid",
             filename="video.mov",
             source_s3_key="tasks/task-1/source/file-1/video.mov",
             output_s3_key=None,  # Missing!
@@ -166,7 +166,7 @@ class TestOutputKeyValidation:
         """PENDING file without output_s3_key passes validation."""
         file = AsyncFile(
             file_id="test-file-id",
-            original_uuid="test-uuid",
+            uuid="test-uuid",
             filename="video.mov",
             source_s3_key="tasks/task-1/source/file-1/video.mov",
             output_s3_key=None,

@@ -25,7 +25,7 @@ class TestAsyncFileConversion:
         """Test basic AsyncFile to API conversion."""
         file = AsyncFile(
             file_id="file-123",
-            original_uuid="uuid-456",
+            uuid="uuid-456",
             filename="test.mov",
             source_s3_key="async/task-1/input/file-123/test.mov",
         )
@@ -44,7 +44,7 @@ class TestAsyncFileConversion:
         """Test AsyncFile to API conversion with all fields populated."""
         file = AsyncFile(
             file_id="file-123",
-            original_uuid="uuid-456",
+            uuid="uuid-456",
             filename="test.mov",
             source_s3_key="async/task-1/input/file-123/test.mov",
             output_s3_key="output/task-1/file-123/test_h265.mp4",
@@ -130,7 +130,7 @@ class TestAsyncFileConversion:
         """Test AsyncFile -> API -> AsyncFile roundtrip preserves data."""
         original = AsyncFile(
             file_id="file-123",
-            original_uuid="uuid-456",
+            uuid="uuid-456",
             filename="test.mov",
             source_s3_key="async/task-1/input/file-123/test.mov",
             output_s3_key="output/task-1/file-123/test_h265.mp4",
@@ -197,7 +197,7 @@ class TestAsyncTaskConversion:
         now = datetime.now()
         file = AsyncFile(
             file_id="file-123",
-            original_uuid="uuid-456",
+            uuid="uuid-456",
             filename="test.mov",
             source_s3_key="async/task-1/input/file-123/test.mov",
             status=FileStatus.COMPLETED,
@@ -285,7 +285,7 @@ class TestAsyncTaskConversion:
         now = datetime.now()
         file = AsyncFile(
             file_id="file-123",
-            original_uuid="uuid-456",
+            uuid="uuid-456",
             filename="test.mov",
             source_s3_key="async/task-1/input/file-123/test.mov",
             status=FileStatus.COMPLETED,
@@ -356,7 +356,7 @@ class TestEdgeCases:
         """Test conversion handles None values correctly."""
         file = AsyncFile(
             file_id="file-123",
-            original_uuid="uuid-456",
+            uuid="uuid-456",
             filename="test.mov",
             source_s3_key="async/task-1/input/file-123/test.mov",
             output_s3_key=None,

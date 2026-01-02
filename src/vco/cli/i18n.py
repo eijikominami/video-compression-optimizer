@@ -174,25 +174,4 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "実行中の非同期タスクをキャンセル",
         "en": "Cancel a running async task",
     },
-    # download command
-    "download.description": {
-        "ja": "完了した非同期タスクの結果をダウンロード\n\n"
-        "COMPLETED または PARTIALLY_COMPLETED 状態のタスクから\n"
-        "変換済みファイルをダウンロードします。",
-        "en": "Download results from completed async tasks\n\n"
-        "Downloads converted files from tasks in COMPLETED\n"
-        "or PARTIALLY_COMPLETED status.",
-    },
-    "download.output": {
-        "ja": "出力ディレクトリ",
-        "en": "Output directory",
-    },
-    "download.no_resume": {
-        "ja": "中断したダウンロードを再開しない",
-        "en": "Do not resume interrupted downloads",
-    },
-    "download.json": {
-        "ja": "JSON形式で出力",
-        "en": "Output in JSON format",
-    },
 }

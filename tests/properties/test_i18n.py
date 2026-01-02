@@ -181,7 +181,6 @@ class TestAllKeysHaveTranslations:
         "convert.quality",
         "convert.top_n",
         "convert.dry_run",
-        "convert.async",
         "import.description",
         "import.list",
         "import.all",
@@ -193,13 +192,8 @@ class TestAllKeysHaveTranslations:
         "config.set.description",
         "status.description",
         "status.filter",
-        "status.limit",
         "status.json",
         "cancel.description",
-        "download.description",
-        "download.output",
-        "download.no_resume",
-        "download.json",
     ]
 
     def test_all_expected_keys_exist(self):

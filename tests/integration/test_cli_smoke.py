@@ -4,7 +4,6 @@ Task 14.4: CLI スモークテスト
 - `vco convert --async --help` が正常終了
 - `vco status --help` が正常終了
 - `vco cancel --help` が正常終了
-- `vco download --help` が正常終了
 
 These tests verify that CLI commands can be invoked without errors,
 catching issues that mocks cannot detect (e.g., missing dependencies,
@@ -61,17 +60,6 @@ class TestCLISmokeTests:
         )
         assert result.returncode == 0, f"Failed: {result.stderr}"
         assert "cancel" in result.stdout.lower() or "usage" in result.stdout.lower()
-
-    def test_vco_download_help(self):
-        """vco download --help should exit successfully."""
-        result = subprocess.run(
-            [sys.executable, "-m", "vco.cli.main", "download", "--help"],
-            capture_output=True,
-            text=True,
-            cwd="/Users/kominami/Documents/Code/video-compression-optimizer",
-        )
-        assert result.returncode == 0, f"Failed: {result.stderr}"
-        assert "download" in result.stdout.lower() or "usage" in result.stdout.lower()
 
     def test_vco_scan_help(self):
         """vco scan --help should exit successfully."""
@@ -169,3 +157,17 @@ class TestCLIInvalidCommands:
         assert result.returncode != 0
         # Should show "No such option" error
         assert "no such option" in result.stderr.lower()
+
+    def test_vco_download_command_removed(self):
+        """vco download should be rejected as unknown command.
+
+        The download command has been removed. Use 'vco import' instead.
+        """
+        result = subprocess.run(
+            [sys.executable, "-m", "vco.cli.main", "download", "--help"],
+            capture_output=True,
+            text=True,
+            cwd="/Users/kominami/Documents/Code/video-compression-optimizer",
+        )
+        # Should fail with non-zero exit code (unknown command)
+        assert result.returncode != 0

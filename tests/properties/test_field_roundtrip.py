@@ -74,7 +74,7 @@ def async_file_strategy(draw):
 
     return AsyncFile(
         file_id=draw(uuid_strategy),
-        original_uuid=draw(uuid_strategy),
+        uuid=draw(uuid_strategy),
         filename=draw(filename_strategy) + ".mov",
         source_s3_key=draw(s3_key_strategy),
         output_s3_key=draw(st.one_of(st.none(), s3_key_strategy)),

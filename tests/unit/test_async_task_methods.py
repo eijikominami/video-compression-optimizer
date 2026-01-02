@@ -179,7 +179,7 @@ class TestAsyncTaskCalculateProgress:
         """Helper to create a file with given status."""
         return AsyncFile(
             file_id=file_id,
-            original_uuid=f"uuid-{file_id}",
+            uuid=f"uuid-{file_id}",
             filename=f"{file_id}.mp4",
             source_s3_key=f"source/{file_id}.mp4",
             status=status,
@@ -309,7 +309,7 @@ class TestAsyncTaskEstimateCompletionTime:
         """Helper to create a file with given status."""
         return AsyncFile(
             file_id=file_id,
-            original_uuid=f"uuid-{file_id}",
+            uuid=f"uuid-{file_id}",
             filename=f"{file_id}.mp4",
             source_s3_key=f"source/{file_id}.mp4",
             status=status,
@@ -377,7 +377,7 @@ class TestAsyncTaskGetFiles:
         """Helper to create a file with given status."""
         return AsyncFile(
             file_id=file_id,
-            original_uuid=f"uuid-{file_id}",
+            uuid=f"uuid-{file_id}",
             filename=f"{file_id}.mp4",
             source_s3_key=f"source/{file_id}.mp4",
             status=status,
@@ -477,7 +477,7 @@ print("OK")
         files = [
             AsyncFile(
                 file_id="file-1",
-                original_uuid="uuid-1",
+                uuid="uuid-1",
                 filename="video1.mp4",
                 source_s3_key="source/video1.mp4",
                 status=FileStatus.COMPLETED,
@@ -485,7 +485,7 @@ print("OK")
             ),
             AsyncFile(
                 file_id="file-2",
-                original_uuid="uuid-2",
+                uuid="uuid-2",
                 filename="video2.mp4",
                 source_s3_key="source/video2.mp4",
                 status=FileStatus.FAILED,
@@ -604,7 +604,7 @@ class TestFileStatusDownloaded:
 
         file = AsyncFile(
             file_id="file-1",
-            original_uuid="uuid-1",
+            uuid="uuid-1",
             filename="test.mp4",
             source_s3_key="source/test.mp4",
             status=FileStatus.DOWNLOADED,
@@ -617,7 +617,7 @@ class TestFileStatusDownloaded:
 
         file = AsyncFile(
             file_id="file-1",
-            original_uuid="uuid-1",
+            uuid="uuid-1",
             filename="test.mp4",
             source_s3_key="source/test.mp4",
             status=FileStatus.DOWNLOADED,
@@ -645,7 +645,7 @@ class TestFileStatusDownloaded:
 
         original = AsyncFile(
             file_id="file-1",
-            original_uuid="uuid-1",
+            uuid="uuid-1",
             filename="test.mp4",
             source_s3_key="source/test.mp4",
             status=FileStatus.DOWNLOADED,

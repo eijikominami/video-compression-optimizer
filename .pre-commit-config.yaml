@@ -1,0 +1,47 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format --check
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [src/]
+
+      - id: ruff-lint
+        name: ruff lint
+        entry: ruff check
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [src/]
+
+      - id: mypy
+        name: mypy type check
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [src/]
+
+      - id: pytest-unit
+        name: unit tests
+        entry: pytest tests/unit/ -v --tb=short -q
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: cfn-lint
+        name: cfn-lint
+        entry: cfn-lint
+        language: system
+        files: sam-app/.*\.yaml$
+        types: [yaml]
+
+      - id: no-main-branch
+        name: prevent commits to main
+        entry: bash -c 'branch=$(git rev-parse --abbrev-ref HEAD); if [ "$branch" = "main" ]; then echo "Direct commits to main are not allowed"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        always_run: true

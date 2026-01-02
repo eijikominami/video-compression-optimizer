@@ -1,13 +1,14 @@
 """AWS Import Service for downloading and preparing AWS completed files.
 
-This service wraps DownloadCommand and StatusCommand to provide
-a unified interface for importing AWS-processed videos.
+This service provides a unified interface for importing AWS-processed videos
+via the cleanup API for atomic status updates and S3 file deletion.
 
 Requirements: 3.1, 3.3, 3.4, 10.1, 10.6
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Callable
@@ -15,10 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import boto3
+from botocore.config import Config
+
 from vco.models.types import ImportableItem
-from vco.services.async_download import DownloadCommand
 from vco.services.async_status import StatusCommand
-from vco.services.download_progress import DownloadProgressStore
+from vco.services.download_progress import DownloadProgress, DownloadProgressStore
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ class AwsDownloadResult:
     task_id: str
     file_id: str
     local_path: Path | None = None
+    metadata_path: Path | None = None
     error_message: str | None = None
     checksum_verified: bool = False
     download_resumed: bool = False
@@ -51,10 +55,10 @@ class CleanupResult:
 class AwsImportService:
     """Service for importing videos from AWS.
 
-    Wraps DownloadCommand and StatusCommand to provide:
+    Provides:
     - List completed files from AWS
     - Download and prepare files for import
-    - Delete S3 files after successful import
+    - Cleanup files via API (atomic status update + S3 deletion)
 
     Requirements: 3.1, 3.3, 3.4
     """
@@ -88,6 +92,13 @@ class AwsImportService:
         if output_dir is None:
             output_dir = Path.home() / "Movies" / "VideoCompressionOptimizer" / "converted"
         self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize AWS clients
+        session = boto3.Session(profile_name=profile_name, region_name=region)
+        config = Config(retries={"max_attempts": 3, "mode": "adaptive"})
+        self.s3_client = session.client("s3", config=config)
+        self.session = session
 
         # Initialize status command for listing
         self.status_command = StatusCommand(
@@ -95,9 +106,6 @@ class AwsImportService:
             region=region,
             profile_name=profile_name,
         )
-
-        # Download command will be created per-download for progress callback
-        self._download_command: DownloadCommand | None = None
 
     def list_completed_files(self, user_id: str | None = None) -> list[ImportableItem]:
         """List all completed files from AWS.
@@ -160,14 +168,14 @@ class AwsImportService:
     ) -> AwsDownloadResult:
         """Download a single file from S3 and prepare for import.
 
-        Downloads the file, verifies checksum, and returns local path.
-        Does NOT add to review queue (UnifiedImportService handles that).
+        Downloads the file directly from S3, verifies checksum, and returns local path.
+        Does NOT delete S3 file or update status - use cleanup_file() for that.
 
         Args:
             task_id: Task ID
             file_id: File ID
             user_id: User identifier
-            progress_callback: Callback for download progress
+            progress_callback: Callback for download progress (filename, percent, downloaded, total)
 
         Returns:
             AwsDownloadResult with local path if successful
@@ -176,18 +184,6 @@ class AwsImportService:
         """
         if user_id is None:
             user_id = self._get_machine_id()
-
-        # Create download command with progress callback
-        download_cmd = DownloadCommand(
-            api_url=self.api_url,
-            s3_bucket=self.s3_bucket,
-            region=self.region,
-            profile_name=self.profile_name,
-            progress_store=self.progress_store,
-            review_service=None,  # Don't add to review queue
-            output_dir=self.output_dir,
-            progress_callback=progress_callback,
-        )
 
         try:
             # Get task detail to find the specific file
@@ -216,22 +212,60 @@ class AwsImportService:
                     error_message=f"File not ready: status={file_detail.status}",
                 )
 
-            # Download the file using internal method
-            file_result = download_cmd._download_file(
-                task_id=task_id,
-                file_detail=file_detail,
-                task=task_detail,
-                resume=True,
-            )
+            # Get S3 key
+            s3_key = file_detail.output_s3_key
+            if not s3_key:
+                return AwsDownloadResult(
+                    success=False,
+                    task_id=task_id,
+                    file_id=file_id,
+                    error_message="File missing output_s3_key",
+                )
 
-            return AwsDownloadResult(
-                success=file_result.success,
+            # Determine output path
+            output_filename = Path(file_detail.filename).stem + "_h265.mp4"
+            output_path = self.output_dir / output_filename
+            temp_path = self.output_dir / f".{output_filename}.tmp"
+
+            # Download file from S3
+            download_result = self._download_s3_file(
+                s3_key=s3_key,
+                output_path=output_path,
+                temp_path=temp_path,
                 task_id=task_id,
                 file_id=file_id,
-                local_path=file_result.local_path,
-                error_message=file_result.error_message,
-                checksum_verified=file_result.checksum_verified,
-                download_resumed=file_result.resumed,
+                progress_callback=progress_callback,
+            )
+
+            if not download_result["success"]:
+                return AwsDownloadResult(
+                    success=False,
+                    task_id=task_id,
+                    file_id=file_id,
+                    error_message=download_result.get("error_message", "Download failed"),
+                )
+
+            # Download metadata file if available
+            metadata_path = None
+            metadata_s3_key = getattr(file_detail, "metadata_s3_key", None)
+            if metadata_s3_key:
+                try:
+                    metadata_filename = f"{Path(file_detail.filename).stem}_metadata.json"
+                    metadata_path = self.output_dir / metadata_filename
+                    self.s3_client.download_file(
+                        self.s3_bucket, metadata_s3_key, str(metadata_path)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to download metadata for {file_id}: {e}")
+
+            return AwsDownloadResult(
+                success=True,
+                task_id=task_id,
+                file_id=file_id,
+                local_path=output_path,
+                metadata_path=metadata_path,
+                checksum_verified=download_result.get("checksum_verified", False),
+                download_resumed=download_result.get("resumed", False),
             )
 
         except Exception as e:
@@ -252,64 +286,205 @@ class AwsImportService:
                 error_message=error_msg,
             )
 
-    def delete_s3_file(
+    def _download_s3_file(
         self,
+        s3_key: str,
+        output_path: Path,
+        temp_path: Path,
         task_id: str,
         file_id: str,
-        user_id: str | None = None,
-    ) -> bool:
-        """Delete S3 output file after successful import.
-
-        Note: This method is deprecated. Use cleanup_file() instead.
+        progress_callback: Callable[..., Any] | None = None,
+    ) -> dict[str, Any]:
+        """Download file from S3 with progress tracking and resume support.
 
         Args:
-            task_id: Task ID
-            file_id: File ID
-            user_id: User identifier
+            s3_key: S3 object key
+            output_path: Final output path
+            temp_path: Temporary file path during download
+            task_id: Task ID for progress tracking
+            file_id: File ID for progress tracking
+            progress_callback: Callback for progress updates
 
         Returns:
-            True if deleted successfully
-
-        Requirements: 3.4
+            Dict with success, checksum_verified, resumed, error_message
         """
-        if user_id is None:
-            user_id = self._get_machine_id()
-
         try:
-            import boto3
-            from botocore.config import Config
+            # Get file info from S3
+            head_response = self.s3_client.head_object(Bucket=self.s3_bucket, Key=s3_key)
+            total_bytes = head_response["ContentLength"]
+            etag = head_response.get("ETag", "").strip('"')
 
-            # Get task detail to find S3 key
-            task_detail = self.status_command.get_task_detail(task_id, user_id)
+            # Check for existing progress (resume support)
+            existing_progress = self.progress_store.get_progress(task_id, file_id)
+            start_byte = 0
+            resumed = False
 
-            # Find the file
-            file_detail = None
-            for f in task_detail.files:
-                if f.file_id == file_id:
-                    file_detail = f
-                    break
+            if existing_progress and temp_path.exists():
+                actual_size = temp_path.stat().st_size
+                if actual_size == existing_progress.downloaded_bytes:
+                    start_byte = actual_size
+                    resumed = True
+                    logger.info(f"Resuming download from byte {start_byte}")
+                else:
+                    temp_path.unlink(missing_ok=True)
+                    self.progress_store.clear_progress(task_id, file_id)
 
-            if file_detail is None:
-                logger.warning(f"File not found for deletion: {task_id}:{file_id}")
-                return False
+            # Download file
+            if start_byte < total_bytes:
+                self._download_with_progress(
+                    s3_key=s3_key,
+                    local_path=temp_path,
+                    task_id=task_id,
+                    file_id=file_id,
+                    total_bytes=total_bytes,
+                    start_byte=start_byte,
+                    checksum=etag,
+                    progress_callback=progress_callback,
+                )
 
-            s3_key = file_detail.output_s3_key
-            if not s3_key:
-                # Construct key if not available
-                output_filename = Path(file_detail.filename).stem + "_h265.mp4"
-                s3_key = f"output/{task_id}/{file_id}/{output_filename}"
+            # Verify checksum
+            checksum_ok = self._verify_checksum(temp_path, etag)
 
-            # Delete from S3
-            session = boto3.Session(profile_name=self.profile_name, region_name=self.region)
-            config = Config(retries={"max_attempts": 3, "mode": "adaptive"})
-            s3_client = session.client("s3", config=config)
+            if not checksum_ok:
+                # Retry once
+                logger.warning("Checksum mismatch, retrying download...")
+                temp_path.unlink(missing_ok=True)
+                self.progress_store.clear_progress(task_id, file_id)
 
-            s3_client.delete_object(Bucket=self.s3_bucket, Key=s3_key)
-            logger.info(f"Deleted S3 file: {s3_key}")
+                self._download_with_progress(
+                    s3_key=s3_key,
+                    local_path=temp_path,
+                    task_id=task_id,
+                    file_id=file_id,
+                    total_bytes=total_bytes,
+                    start_byte=0,
+                    checksum=etag,
+                    progress_callback=progress_callback,
+                )
+
+                checksum_ok = self._verify_checksum(temp_path, etag)
+                if not checksum_ok:
+                    return {
+                        "success": False,
+                        "error_message": "Checksum verification failed after retry",
+                    }
+
+            # Move temp file to final location
+            temp_path.rename(output_path)
+            self.progress_store.clear_progress(task_id, file_id)
+
+            return {
+                "success": True,
+                "checksum_verified": checksum_ok,
+                "resumed": resumed,
+            }
+
+        except self.s3_client.exceptions.NoSuchKey:
+            return {
+                "success": False,
+                "error_message": "File not found in S3",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error_message": str(e),
+            }
+
+    def _download_with_progress(
+        self,
+        s3_key: str,
+        local_path: Path,
+        task_id: str,
+        file_id: str,
+        total_bytes: int,
+        start_byte: int,
+        checksum: str,
+        progress_callback: Callable[..., Any] | None = None,
+    ) -> None:
+        """Download file with progress tracking.
+
+        Args:
+            s3_key: S3 object key
+            local_path: Local file path
+            task_id: Task ID
+            file_id: File ID
+            total_bytes: Total file size
+            start_byte: Starting byte for resume
+            checksum: Expected checksum
+            progress_callback: Callback for progress updates
+        """
+        downloaded = start_byte
+
+        def callback(bytes_amount: int) -> None:
+            nonlocal downloaded
+            downloaded += bytes_amount
+
+            # Save progress periodically (every 1MB)
+            if downloaded % (1024 * 1024) == 0 or downloaded >= total_bytes:
+                progress = DownloadProgress(
+                    task_id=task_id,
+                    file_id=file_id,
+                    total_bytes=total_bytes,
+                    downloaded_bytes=downloaded,
+                    local_temp_path=str(local_path),
+                    s3_key=s3_key,
+                    checksum=checksum,
+                )
+                self.progress_store.save_progress(progress)
+
+            # Report progress
+            if progress_callback:
+                progress_callback(
+                    local_path.name,
+                    int((downloaded / total_bytes) * 100),
+                    downloaded,
+                    total_bytes,
+                )
+
+        if start_byte > 0:
+            # Range request for resume
+            response = self.s3_client.get_object(
+                Bucket=self.s3_bucket, Key=s3_key, Range=f"bytes={start_byte}-"
+            )
+            with open(local_path, "ab") as f:
+                for chunk in response["Body"].iter_chunks(chunk_size=8192):
+                    f.write(chunk)
+                    callback(len(chunk))
+        else:
+            # Full download
+            self.s3_client.download_file(
+                self.s3_bucket,
+                s3_key,
+                str(local_path),
+                Callback=callback,
+            )
+
+    def _verify_checksum(self, local_path: Path, expected_etag: str) -> bool:
+        """Verify file checksum against S3 ETag.
+
+        Args:
+            local_path: Local file path
+            expected_etag: Expected ETag from S3
+
+        Returns:
+            True if checksum matches
+        """
+        # Multipart uploads have different ETag format
+        if "-" in expected_etag:
+            logger.warning("Multipart upload detected, skipping checksum verification")
             return True
 
+        try:
+            md5_hash = hashlib.md5()
+            with open(local_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    md5_hash.update(chunk)
+
+            calculated = md5_hash.hexdigest()
+            return calculated == expected_etag
+
         except Exception as e:
-            logger.warning(f"Failed to delete S3 file {task_id}:{file_id}: {e}")
+            logger.warning(f"Checksum verification failed: {e}")
             return False
 
     def cleanup_file(
@@ -477,7 +652,6 @@ class AwsImportService:
 
     def _get_machine_id(self) -> str:
         """Get machine identifier for user_id."""
-        import hashlib
         import platform
 
         machine_info = f"{platform.node()}-{platform.machine()}"

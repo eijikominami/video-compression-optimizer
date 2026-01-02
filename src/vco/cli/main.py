@@ -13,7 +13,6 @@ Usage:
 import json
 import sys
 from datetime import datetime
-from pathlib import Path
 
 import click
 from rich.console import Console
@@ -22,10 +21,8 @@ from rich.table import Table
 from vco.analyzer.analyzer import CompressionAnalyzer
 from vco.cli.i18n import get_help
 from vco.config.manager import ConfigManager
-from vco.metadata.manager import MetadataManager
 from vco.photos.manager import PhotosAccessManager
 from vco.services.import_service import ImportService
-from vco.services.review import ReviewService
 from vco.services.scan import ScanService
 
 console = Console()
@@ -1102,157 +1099,6 @@ def cancel(ctx, task_id: str):
 
 # Override cancel help text dynamically based on locale
 cancel.help = get_help("cancel.description")
-
-
-@cli.command()
-@click.argument("task_id")
-@click.option("--output", "-o", "output_dir", type=click.Path(), help=get_help("download.output"))
-@click.option("--no-resume", is_flag=True, help=get_help("download.no_resume"))
-@click.option("--json", "output_json", is_flag=True, help=get_help("download.json"))
-@click.pass_context
-def download(ctx, task_id: str, output_dir: str | None, no_resume: bool, output_json: bool):
-    """Download results from completed async tasks.
-
-    DEPRECATED: Use 'vco import' instead.
-    """
-    # Show deprecation warning
-    console.print("[yellow]⚠ 'vco download' is deprecated. Use 'vco import' instead.[/yellow]")
-    console.print("[dim]  vco import --list    List all importable items (local + AWS)[/dim]")
-    console.print("[dim]  vco import --all     Import all items[/dim]")
-    console.print()
-
-    from rich.progress import (
-        BarColumn,
-        DownloadColumn,
-        Progress,
-        SpinnerColumn,
-        TextColumn,
-        TransferSpeedColumn,
-    )
-
-    from vco.services.async_download import DownloadCommand
-
-    config = ctx.obj["config"]
-    aws_config = config.config.aws
-
-    # Get API URL
-    api_url = getattr(aws_config, "async_api_url", None)
-    if not api_url:
-        api_url = f"https://dln48ri1di.execute-api.{aws_config.region}.amazonaws.com/dev"
-
-    # Determine output directory
-    if output_dir:
-        output_path = Path(output_dir)
-    else:
-        output_path = Path(config.get("conversion.staging_folder")).expanduser()
-
-    # Use Rich Progress for download progress display
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.fields[filename]}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        DownloadColumn(),
-        TransferSpeedColumn(),
-        console=console,
-    )
-
-    # Track current task for progress updates
-    current_task_id = None
-    current_filename = None
-
-    def progress_callback(filename, percent, downloaded, total):
-        nonlocal current_task_id, current_filename
-
-        # Create new task if filename changed
-        if filename != current_filename:
-            if current_task_id is not None:
-                # Complete previous task
-                progress.update(current_task_id, completed=progress.tasks[current_task_id].total)
-
-            current_filename = filename
-            current_task_id = progress.add_task(
-                "download",
-                filename=filename,
-                total=total,
-            )
-
-        # Update progress
-        if current_task_id is not None:
-            progress.update(current_task_id, completed=downloaded)
-
-    try:
-        download_cmd = DownloadCommand(
-            api_url=api_url,
-            s3_bucket=aws_config.s3_bucket,
-            region=aws_config.region,
-            profile_name=aws_config.profile or None,
-            output_dir=output_path,
-            progress_callback=progress_callback,
-        )
-
-        console.print(f"[bold]Downloading task: {task_id}[/bold]")
-        console.print(f"Output directory: {output_path}")
-        console.print()
-
-        with progress:
-            result = download_cmd.download(
-                task_id=task_id,
-                resume=not no_resume,
-            )
-
-        if output_json:
-            click.echo(
-                json.dumps(
-                    {
-                        "task_id": result.task_id,
-                        "success": result.success,
-                        "total_files": result.total_files,
-                        "downloaded_files": result.downloaded_files,
-                        "failed_files": result.failed_files,
-                        "added_to_queue": result.added_to_queue,
-                        "results": [
-                            {
-                                "file_id": r.file_id,
-                                "filename": r.filename,
-                                "success": r.success,
-                                "local_path": str(r.local_path) if r.local_path else None,
-                                "error_message": r.error_message,
-                            }
-                            for r in result.results
-                        ],
-                    },
-                    indent=2,
-                )
-            )
-            return
-
-        console.print()
-        console.print("[bold]Download Complete[/bold]")
-        console.print(f"  Total files: {result.total_files}")
-        console.print(f"  Downloaded: [green]{result.downloaded_files}[/green]")
-        console.print(f"  Failed: [red]{result.failed_files}[/red]")
-        console.print(f"  Added to review queue: [cyan]{result.added_to_queue}[/cyan]")
-
-        if result.failed_files > 0:
-            console.print()
-            console.print("[red]Errors:[/red]")
-            for r in result.results:
-                if not r.success:
-                    console.print(f"  - {r.filename}: {r.error_message}")
-
-        if result.downloaded_files > 0:
-            console.print()
-            console.print(f"[green]Files saved to: {output_path}[/green]")
-            console.print("[dim]Run 'vco import --list' to see pending imports[/dim]")
-
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-# Override download help text dynamically based on locale
-download.help = get_help("download.description")
 
 
 def _format_status(status: str) -> str:

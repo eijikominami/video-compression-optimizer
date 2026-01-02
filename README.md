@@ -159,7 +159,6 @@ vco import --clear
 **Note**: 
 - The `--remove` and `--clear` options delete both the queue entry and the corresponding converted video and metadata files.
 - `--clear` only affects local queue; AWS items remain in S3.
-- `vco download` is deprecated. Use `vco import` instead.
 
 After import, manually delete original videos in Photos app.
 
