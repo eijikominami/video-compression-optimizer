@@ -368,6 +368,7 @@ class TestConvertCommand:
         mock_video = MagicMock()
         mock_video.filename = "test.mp4"
         mock_video.file_size = 1000000
+        mock_video.is_local = True  # Required for candidate classification
 
         mock_candidate = MagicMock()
         mock_candidate.video = mock_video
@@ -381,7 +382,8 @@ class TestConvertCommand:
         mock_scan.return_value = mock_scan_instance
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["convert", "--dry-run"])
+        # Use --yes to skip confirmation prompt
+        result = runner.invoke(cli, ["convert", "--dry-run", "--yes"])
 
         assert result.exit_code == 0
         assert "Dry run mode" in result.output

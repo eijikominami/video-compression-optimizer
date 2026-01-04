@@ -1,7 +1,7 @@
 """Photos Access Manager for Video Compression Optimizer.
 
-This module provides access to Apple Photos library using osxphotos for reading
-and photoscript for writing operations.
+This module provides read-only access to Apple Photos library using osxphotos.
+For write operations (import, delete, album management), use SwiftBridge instead.
 """
 
 import subprocess
@@ -18,10 +18,10 @@ class PhotosAccessError(Exception):
 
 
 class PhotosAccessManager:
-    """Manages access to Apple Photos library.
+    """Manages read-only access to Apple Photos library.
 
-    Uses osxphotos for reading (scanning, metadata extraction, export)
-    and photoscript for writing (import, album operations, delete).
+    Uses osxphotos for reading operations (scanning, metadata extraction, export).
+    For write operations (import, delete, album management), use SwiftBridge instead.
     """
 
     # Video file extensions supported by Photos
@@ -313,73 +313,6 @@ class PhotosAccessManager:
         """
         return ""
 
-    def download_from_icloud(self, video: VideoInfo, timeout: int = 300) -> Path:
-        """Download video from iCloud.
-
-        Args:
-            video: VideoInfo object for the video to download
-            timeout: Download timeout in seconds
-
-        Returns:
-            Path to the downloaded video
-
-        Raises:
-            PhotosAccessError: If download fails
-        """
-        # Check if file is already local
-        if video.is_local and video.path.exists():
-            return video.path
-
-        try:
-            import tempfile
-
-            from osxphotos.photoexporter import ExportOptions, PhotoExporter
-
-            # Get the photo object
-            photos = self.photosdb.photos(uuid=[video.uuid])
-            if not photos:
-                raise PhotosAccessError(f"Video not found: {video.uuid}")
-
-            photo = photos[0]
-
-            # Check if path is available (local file)
-            if photo.path and Path(photo.path).exists():
-                return Path(photo.path)
-
-            # For iCloud files, use PhotoExporter with download_missing=True
-            # This uses AppleScript to trigger Photos app to download from iCloud
-            temp_dir = Path(tempfile.gettempdir()) / "vco_icloud_downloads"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-            # Use PhotoExporter for better iCloud download support
-            exporter = PhotoExporter(photo)
-            options = ExportOptions(download_missing=True, use_photos_export=True, timeout=timeout)
-            results = exporter.export(str(temp_dir), options=options)
-
-            # Check if export was successful
-            if results.exported and len(results.exported) > 0:
-                exported_path = Path(results.exported[0])
-                if exported_path.exists():
-                    return exported_path
-
-            # If still missing, the file couldn't be downloaded
-            if results.missing:
-                raise PhotosAccessError(
-                    f"Video is in iCloud but could not be downloaded. "
-                    f"Please download it manually in Photos app first: {video.filename}"
-                )
-
-            # Check for errors
-            if results.error:
-                raise PhotosAccessError(f"Export error: {results.error}")
-
-            raise PhotosAccessError(f"Failed to download video from iCloud: {video.uuid}")
-
-        except ImportError:
-            raise PhotosAccessError("osxphotos is not installed")
-        except Exception as e:
-            raise PhotosAccessError(f"iCloud download failed: {e}")
-
     def get_video_by_uuid(self, uuid: str) -> VideoInfo | None:
         """Get a specific video by UUID.
 
@@ -394,10 +327,13 @@ class PhotosAccessManager:
             return self._extract_video_info(photos[0])
         return None
 
-    # ========== Write Operations (using photoscript) ==========
+    # ========== Write Operations (deprecated - use SwiftBridge) ==========
 
     def import_video(self, video_path: Path, album_name: str | None = None) -> str:
         """Import a video into Photos library.
+
+        DEPRECATED: Use SwiftBridge.import_video() instead.
+        This method is kept for backward compatibility but should not be used.
 
         Args:
             video_path: Path to the video file to import
@@ -407,162 +343,80 @@ class PhotosAccessManager:
             UUID of the imported video
 
         Raises:
-            PhotosAccessError: If import fails
+            PhotosAccessError: Always raises - use SwiftBridge instead
         """
-        if not video_path.exists():
-            raise PhotosAccessError(f"Video file not found: {video_path}")
+        raise PhotosAccessError(
+            "PhotosAccessManager.import_video() is deprecated. Use SwiftBridge.import_video() instead."
+        )
 
-        try:
-            import photoscript
+    def _add_to_album_by_uuid(self, uuid: str, album_name: str) -> None:
+        """Add a photo to an album by UUID using AppleScript.
 
-            photos_app = photoscript.PhotosLibrary()
+        DEPRECATED: Use SwiftBridge instead.
 
-            # Import the video
-            imported = photos_app.import_photos([str(video_path)])
+        Args:
+            uuid: Photo UUID
+            album_name: Album name
 
-            if not imported:
-                raise PhotosAccessError(f"Failed to import video: {video_path}")
-
-            imported_photo = imported[0]
-
-            # Add to album if specified
-            if album_name:
-                self._add_to_album_by_name(imported_photo, album_name)
-
-            return str(imported_photo.uuid)
-
-        except ImportError:
-            raise PhotosAccessError(
-                "photoscript is not installed. Install with: pip install photoscript"
-            )
-        except Exception as e:
-            raise PhotosAccessError(f"Failed to import video: {e}")
+        Raises:
+            PhotosAccessError: Always raises - use SwiftBridge instead
+        """
+        raise PhotosAccessError(
+            "PhotosAccessManager._add_to_album_by_uuid() is deprecated. Use SwiftBridge instead."
+        )
 
     def delete_video(self, uuid: str) -> bool:
         """Move a video to Photos trash.
+
+        DEPRECATED: Use SwiftBridge.delete_video() instead.
 
         Args:
             uuid: UUID of the video to delete (osxphotos format)
 
         Returns:
-            True if successful
+            Always False
 
         Raises:
-            PhotosAccessError: If deletion fails
-
-        Note:
-            Uses AppleScript with the UUID directly (media item id).
-            The osxphotos UUID format works with AppleScript's media item id.
+            PhotosAccessError: Always raises - use SwiftBridge instead
         """
-        try:
-            import subprocess
-
-            # Use AppleScript to delete by UUID (safest method)
-            # The osxphotos UUID works directly with AppleScript's media item id
-            script = f'''
-            tell application "Photos"
-                try
-                    set theItem to media item id "{uuid}"
-                    delete theItem
-                    return "deleted"
-                on error errMsg
-                    return "error: " & errMsg
-                end try
-            end tell
-            '''
-
-            result = subprocess.run(
-                ["osascript", "-e", script], capture_output=True, text=True, timeout=30
-            )
-
-            if result.returncode != 0:
-                raise PhotosAccessError(f"AppleScript error: {result.stderr}")
-
-            output = result.stdout.strip()
-
-            if output == "deleted":
-                return True
-            elif "error:" in output:
-                # Check if already deleted (not found)
-                if "取り出すことはできません" in output or "can't get" in output.lower():
-                    # Video already deleted or not found - treat as success
-                    return True
-                raise PhotosAccessError(f"AppleScript error: {output}")
-
-            return True
-
-        except subprocess.TimeoutExpired:
-            raise PhotosAccessError("Timeout while deleting video")
-        except PhotosAccessError:
-            raise
-        except Exception as e:
-            raise PhotosAccessError(f"Failed to delete video: {e}")
+        raise PhotosAccessError(
+            "PhotosAccessManager.delete_video() is deprecated. Use SwiftBridge.delete_video() instead."
+        )
 
     def add_to_albums(self, uuid: str, album_names: list[str]) -> bool:
         """Add a video to multiple albums.
+
+        DEPRECATED: Use SwiftBridge.add_to_albums() instead.
 
         Args:
             uuid: UUID of the video
             album_names: List of album names to add the video to
 
         Returns:
-            True if successful
+            Always False
 
         Raises:
-            PhotosAccessError: If operation fails
+            PhotosAccessError: Always raises - use SwiftBridge instead
         """
-        if not album_names:
-            return True
-
-        try:
-            import photoscript
-
-            photos_app = photoscript.PhotosLibrary()
-
-            # Find the photo by UUID
-            photos = list(photos_app.photos(uuid=[uuid]))
-            if not photos:
-                raise PhotosAccessError(f"Video not found: {uuid}")
-
-            photo = photos[0]
-
-            # Add to each album
-            for album_name in album_names:
-                self._add_to_album_by_name(photo, album_name)
-
-            return True
-
-        except ImportError:
-            raise PhotosAccessError(
-                "photoscript is not installed. Install with: pip install photoscript"
-            )
-        except Exception as e:
-            raise PhotosAccessError(f"Failed to add video to albums: {e}")
+        raise PhotosAccessError(
+            "PhotosAccessManager.add_to_albums() is deprecated. Use SwiftBridge.add_to_albums() instead."
+        )
 
     def _add_to_album_by_name(self, photo, album_name: str) -> None:
         """Add a photo to an album by name, creating the album if needed.
 
+        DEPRECATED: Use SwiftBridge instead.
+
         Args:
             photo: photoscript Photo object
             album_name: Name of the album
+
+        Raises:
+            PhotosAccessError: Always raises - use SwiftBridge instead
         """
-        import photoscript
-
-        photos_app = photoscript.PhotosLibrary()
-
-        # Try to find existing album by iterating all albums
-        album = None
-        for a in photos_app.albums():
-            if a.name == album_name:
-                album = a
-                break
-
-        if album is None:
-            # Create new album
-            album = photos_app.create_album(album_name)
-
-        # Add photo to album
-        album.add([photo])
+        raise PhotosAccessError(
+            "PhotosAccessManager._add_to_album_by_name() is deprecated. Use SwiftBridge instead."
+        )
 
     def export_video(self, uuid: str, destination: Path) -> Path:
         """Export a video from Photos library.

@@ -22,7 +22,6 @@ from vco.analyzer.analyzer import CompressionAnalyzer
 from vco.cli.i18n import get_help
 from vco.config.manager import ConfigManager
 from vco.photos.manager import PhotosAccessManager
-from vco.services.import_service import ImportService
 from vco.services.scan import ScanService
 
 console = Console()
@@ -76,7 +75,6 @@ cli.help = get_help("cli.description")
 @click.option("--to", "to_date", type=str, help=get_help("scan.to_date"))
 @click.option("--top-n", type=int, help=get_help("scan.top_n"))
 @click.option("--json", "output_json", is_flag=True, help=get_help("scan.json"))
-@click.option("--legacy", is_flag=True, help=get_help("scan.legacy"))
 @click.pass_context
 def scan(
     ctx,
@@ -84,7 +82,6 @@ def scan(
     to_date: str | None,
     top_n: int | None,
     output_json: bool,
-    legacy: bool,
 ):
     """Scan Apple Photos library and display conversion candidates."""
     config = ctx.obj["config"]
@@ -93,28 +90,8 @@ def scan(
     from_dt = parse_date(from_date) if from_date else None
     to_dt = parse_date(to_date) if to_date else None
 
-    # Initialize services - use Swift by default, legacy Python if --legacy
-    photos_manager: PhotosAccessManager
-    if legacy:
-        # Show deprecation warning to stderr
-        click.echo(
-            "⚠ --legacy mode is deprecated and will be removed in a future version.",
-            err=True,
-        )
-        photos_manager = PhotosAccessManager()
-    else:
-        # Use Swift implementation
-        try:
-            from vco.photos.swift_bridge import SwiftBridge
-
-            photos_manager = SwiftBridge()  # type: ignore[assignment]
-        except Exception as e:
-            # Fall back to legacy if Swift binary not available
-            click.echo(
-                f"⚠ Swift implementation unavailable ({e}), falling back to legacy mode.",
-                err=True,
-            )
-            photos_manager = PhotosAccessManager()
+    # Use osxphotos (PhotosAccessManager) for accurate codec detection
+    photos_manager = PhotosAccessManager()
 
     analyzer = CompressionAnalyzer()
     scan_service = ScanService(photos_manager=photos_manager, analyzer=analyzer)
@@ -248,7 +225,6 @@ scan.help = get_help("scan.description")
 @click.option("--skip-icloud", is_flag=True, help=get_help("convert.skip_icloud"))
 @click.option("--download-timeout", type=int, help=get_help("convert.download_timeout"))
 @click.option("--yes", "-y", is_flag=True, help=get_help("convert.yes"))
-@click.option("--legacy", is_flag=True, help=get_help("convert.legacy"))
 @click.pass_context
 def convert(
     ctx,
@@ -258,7 +234,6 @@ def convert(
     skip_icloud: bool,
     download_timeout: int | None,
     yes: bool,
-    legacy: bool,
 ):
     """Convert candidate videos to H.265."""
     config = ctx.obj["config"]
@@ -297,30 +272,52 @@ def convert(
 
     # Handle iCloud candidates
     downloaded_candidates: list = []
-    if icloud_candidates:
-        if legacy:
-            # Legacy mode: skip iCloud videos with message
-            console.print()
-            console.print("[yellow]⚠ Legacy mode: iCloud auto-download is not available.[/yellow]")
-            console.print(
-                f"[yellow]  Skipping {len(icloud_candidates)} iCloud-only videos.[/yellow]"
-            )
-        elif skip_icloud:
-            # Skip iCloud videos
-            console.print()
-            console.print(
-                f"[yellow]⚠ Skipping {len(icloud_candidates)} iCloud-only videos (--skip-icloud).[/yellow]"
-            )
-        else:
-            # Download iCloud videos
-            downloaded_candidates = _download_icloud_videos(icloud_candidates, timeout, yes)
+    if icloud_candidates and skip_icloud:
+        # Skip iCloud videos
+        console.print()
+        console.print(
+            f"[yellow]⚠ Skipping {len(icloud_candidates)} iCloud-only videos (--skip-icloud).[/yellow]"
+        )
+
+    # Show unified summary and single confirmation prompt
+    if not skip_icloud and icloud_candidates:
+        total_icloud_size = sum(c.video.file_size for c in icloud_candidates)
+        console.print()
+        console.print("[bold]Planned actions:[/bold]")
+        console.print(
+            f"  1. Download {len(icloud_candidates)} iCloud videos ({format_size(total_icloud_size)})"
+        )
+        console.print(f"  2. Upload {len(local_candidates) + len(icloud_candidates)} files to S3")
+        console.print(f"  3. Process with quality preset: {quality}")
+    elif local_candidates:
+        console.print()
+        console.print("[bold]Planned actions:[/bold]")
+        console.print(f"  1. Upload {len(local_candidates)} files to S3")
+        console.print(f"  2. Process with quality preset: {quality}")
+
+    console.print()
+    console.print("[yellow]Files will be uploaded to S3 and processed asynchronously.[/yellow]")
+    console.print("[yellow]Use 'vco status' to check progress.[/yellow]")
+    console.print()
+
+    # Single confirmation prompt
+    if not yes:
+        if not click.confirm("Do you want to proceed?"):
+            console.print("Cancelled.")
+            return
+
+    # Download iCloud videos (skip_confirm=True since we already confirmed)
+    if icloud_candidates and not skip_icloud:
+        downloaded_candidates = _download_icloud_videos(
+            icloud_candidates, timeout, skip_confirm=True
+        )
 
     # Combine local and downloaded candidates
     final_candidates = local_candidates + downloaded_candidates
 
     if not final_candidates:
         console.print("[yellow]No local files available for conversion.[/yellow]")
-        if icloud_candidates and not skip_icloud and not legacy:
+        if icloud_candidates and not skip_icloud:
             console.print(
                 "[dim]All iCloud downloads failed. Check network connection and try again.[/dim]"
             )
@@ -355,8 +352,8 @@ def convert(
         )
         sys.exit(1)
 
-    # Execute async conversion
-    _convert_async(ctx, final_candidates, quality, aws_config)
+    # Execute async conversion (skip_confirm=True since we already confirmed)
+    _convert_async(ctx, final_candidates, quality, aws_config, skip_confirm=True)
 
 
 # Override convert help text dynamically based on locale
@@ -369,6 +366,7 @@ convert.help = get_help("convert.description")
 @click.option("--clear", "clear_mode", is_flag=True, help=get_help("import.clear"))
 @click.option("--remove", "remove_id", help=get_help("import.remove"))
 @click.option("--json", "output_json", is_flag=True, help=get_help("import.json"))
+@click.option("--yes", "-y", is_flag=True, help=get_help("import.yes"))
 @click.argument("item_id", required=False)
 @click.pass_context
 def import_cmd(
@@ -378,6 +376,7 @@ def import_cmd(
     clear_mode: bool,
     remove_id: str | None,
     output_json: bool,
+    yes: bool,
     item_id: str | None,
 ):
     """Import converted videos to Photos library."""
@@ -386,7 +385,6 @@ def import_cmd(
 
     config = ctx.obj["config"]
     aws_config = config.config.aws
-    local_service = ImportService()
 
     # Initialize AWS service if configured
     aws_service = None
@@ -403,11 +401,10 @@ def import_cmd(
                 profile_name=aws_config.profile or None,
             )
         except Exception:
-            # AWS service initialization failed, continue with local only
+            # AWS service initialization failed
             pass
 
     unified_service = UnifiedImportService(
-        local_service=local_service,
         aws_service=aws_service,
     )
 
@@ -415,31 +412,22 @@ def import_cmd(
     if clear_mode:
         # Get all importable items to show what will be deleted
         list_result = unified_service.list_all_importable()
-        local_items = [item for item in list_result.all_items if item.source == "local"]
         aws_items = [item for item in list_result.all_items if item.source == "aws"]
 
-        if not local_items and not aws_items:
+        if not aws_items:
             console.print("[green]No items available for removal.[/green]")
             return
 
         console.print("[yellow]Will remove the following items and files:[/yellow]")
-        if local_items:
-            console.print(f"  • {len(local_items)} local items (files will be deleted)")
-        if aws_items:
-            console.print(f"  • {len(aws_items)} AWS items (S3 files will be deleted)")
+        console.print(f"  • {len(aws_items)} AWS items (S3 files will be deleted)")
 
-        if not click.confirm("Do you want to proceed?"):
+        if not yes and not click.confirm("Do you want to proceed?"):
             console.print("Cancelled.")
             return
 
         result = unified_service.clear_all_queues()
         if result.success:
             console.print(f"[green]✓ Removed {result.total_items_removed} items total.[/green]")
-
-            if result.local_items_removed > 0:
-                console.print(
-                    f"[green]✓ Local: {result.local_items_removed} items, {result.local_files_deleted} files deleted.[/green]"
-                )
 
             if result.aws_items_removed > 0:
                 console.print(
@@ -610,14 +598,63 @@ def import_cmd(
         )
         console.print()
 
-        if not click.confirm("Do you want to proceed?"):
+        if not yes and not click.confirm("Do you want to proceed?"):
             console.print("Cancelled.")
             return
 
         console.print()
-        console.print("[bold]Importing...[/bold]")
 
-        batch_result = unified_service.import_all()
+        # Use rich Progress for AWS downloads (same style as single item import)
+        from rich.progress import (
+            BarColumn,
+            DownloadColumn,
+            Progress,
+            SpinnerColumn,
+            TaskID,
+            TextColumn,
+            TimeRemainingColumn,
+            TransferSpeedColumn,
+        )
+
+        # Track import status
+        download_tasks: dict[str, TaskID] = {}  # filename -> task_id
+        import_tasks: dict[str, TaskID] = {}  # filename -> task_id
+
+        def download_progress_callback(
+            filename: str, percent: int, downloaded: int, total: int
+        ) -> None:
+            """Display download progress for AWS files using rich Progress."""
+            if filename not in download_tasks:
+                task_id = progress.add_task(f"Downloading {filename}", total=total)
+                download_tasks[filename] = task_id
+            progress.update(download_tasks[filename], completed=downloaded)
+
+        def status_callback(filename: str, status: str) -> None:
+            """Display status updates for import process."""
+            if status == "importing" and filename not in import_tasks:
+                # Mark download as complete and add import task (spinner only, no progress bar)
+                if filename in download_tasks:
+                    progress.update(download_tasks[filename], visible=False)
+                task_id = progress.add_task(
+                    f"Importing {filename} to Photos...", total=0, visible=True
+                )
+                import_tasks[filename] = task_id
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            batch_result = unified_service.import_all(
+                progress_callback=download_progress_callback,
+                status_callback=status_callback,
+            )
+
+        # Show completion message
 
         if output_json:
             click.echo(
@@ -713,7 +750,7 @@ def import_cmd(
         )
         console.print()
 
-        if not click.confirm("Do you want to proceed?"):
+        if not yes and not click.confirm("Do you want to proceed?"):
             console.print("Cancelled.")
             return
 
@@ -747,37 +784,12 @@ def import_cmd(
                 item_id, progress_callback=progress_callback
             )
     else:
-        # Local item - get info first
-        review_item = local_service.review_service.get_review_by_id(item_id)
-        if review_item is None:
-            console.print(f"[red]Error: ID not found: {item_id}[/red]")
-            sys.exit(1)
-
-        if review_item.status != "pending_review":
-            console.print(
-                f"[yellow]This item has already been processed: {review_item.status}[/yellow]"
-            )
-            sys.exit(1)
-
-        albums = review_item.metadata.get("albums", [])
-
-        console.print(f"[bold]Import: {review_item.converted_path.name}[/bold]")
+        # Non-AWS item ID format - not supported
+        console.print(f"[red]Error: Invalid item ID format: {item_id}[/red]")
         console.print()
-        console.print("Actions:")
-        console.print("  1. Import converted video to Photos")
-        if albums:
-            console.print(f"  2. Add to albums: {', '.join(albums)}")
-        console.print()
-        console.print(
-            "[yellow]Note: After import, manually delete original video in Photos app.[/yellow]"
-        )
-        console.print()
-
-        if not click.confirm("Do you want to proceed?"):
-            console.print("Cancelled.")
-            return
-
-        import_result = unified_service.import_item(item_id)
+        console.print("Item ID must be in AWS format: task_id:file_id")
+        console.print("Use 'vco import --list' to see available items.")
+        sys.exit(1)
 
     if output_json:
         click.echo(
@@ -922,10 +934,22 @@ def _download_icloud_videos(candidates, timeout: int, skip_confirm: bool) -> lis
         console.print(f"[red]Error: Swift bridge unavailable: {e}[/red]")
         return []
 
-    # Initialize download service
+    # Initialize download service with progress callback
+    current_task_id = None
+
+    def progress_callback(progress_info):
+        nonlocal current_task_id
+        if current_task_id is not None:
+            progress.update(
+                current_task_id,
+                completed=progress_info.downloaded_bytes,
+                total=progress_info.total_bytes,
+            )
+
     download_service = ICloudDownloadService(
         swift_bridge=swift_bridge,
         timeout=timeout,
+        progress_callback=progress_callback,
     )
 
     # Check disk space
@@ -961,6 +985,7 @@ def _download_icloud_videos(candidates, timeout: int, skip_confirm: bool) -> lis
         TextColumn("[bold blue]{task.fields[filename]}"),
         BarColumn(),
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("{task.fields[size]}"),
         TimeElapsedColumn(),
         console=console,
     )
@@ -968,27 +993,32 @@ def _download_icloud_videos(candidates, timeout: int, skip_confirm: bool) -> lis
     with progress:
         for i, candidate in enumerate(candidates):
             video = candidate.video
-            task_id = progress.add_task(
+            current_task_id = progress.add_task(
                 "download",
                 filename=f"[{i + 1}/{len(candidates)}] {video.filename[:30]}",
-                total=100,
+                size=format_size(video.file_size),
+                total=video.file_size,
             )
 
             # Download
             result = download_service.download_video(video)
 
-            if result.success:
-                progress.update(task_id, completed=100)
+            if result.success and result.local_path:
+                progress.update(current_task_id, completed=video.file_size)
                 console.print(
                     f"  [green]✓[/green] {video.filename} ({result.download_time_seconds:.1f}s)"
                 )
+                # Update video path and is_local flag after successful download
+                video.path = result.local_path
+                video.is_local = True
                 downloaded_candidates.append(candidate)
             else:
-                progress.update(task_id, completed=100)
+                progress.update(current_task_id, completed=video.file_size)
                 console.print(f"  [red]✗[/red] {video.filename}: {result.error_message}")
                 failed_downloads.append((video.filename, result.error_message))
 
-            progress.remove_task(task_id)
+            progress.remove_task(current_task_id)
+            current_task_id = None
 
     # Show summary
     console.print()
@@ -1009,7 +1039,7 @@ def _download_icloud_videos(candidates, timeout: int, skip_confirm: bool) -> lis
     return downloaded_candidates
 
 
-def _convert_async(ctx, candidates, quality: str, aws_config):
+def _convert_async(ctx, candidates, quality: str, aws_config, skip_confirm: bool = False):
     """Handle async conversion mode."""
     from rich.progress import (
         BarColumn,
@@ -1031,14 +1061,6 @@ def _convert_async(ctx, candidates, quality: str, aws_config):
     console.print()
     console.print("[bold]Async conversion mode[/bold]")
     console.print(f"API URL: {api_url}")
-    console.print()
-    console.print("[yellow]Files will be uploaded to S3 and processed asynchronously.[/yellow]")
-    console.print("[yellow]Use 'vco status' to check progress.[/yellow]")
-    console.print()
-
-    if not click.confirm("Do you want to proceed?"):
-        console.print("Cancelled.")
-        return
 
     # Use Rich Progress for upload progress display
     progress = Progress(
@@ -1091,6 +1113,9 @@ def _convert_async(ctx, candidates, quality: str, aws_config):
                 candidates=candidates,
                 quality_preset=quality,
             )
+            # Complete the last file's progress before exiting the progress context
+            if current_task_id is not None:
+                progress.update(current_task_id, completed=progress.tasks[current_task_id].total)
 
         if result.status == "ERROR":
             console.print(f"[red]✗ Failed: {result.error_message}[/red]")
@@ -1265,9 +1290,10 @@ status.help = get_help("status.description")
 
 
 @cli.command()
+@click.option("--yes", "-y", is_flag=True, help=get_help("cancel.yes"))
 @click.argument("task_id")
 @click.pass_context
-def cancel(ctx, task_id: str):
+def cancel(ctx, yes: bool, task_id: str):
     """Cancel a running async task."""
     from vco.services.async_cancel import CancelCommand
 
@@ -1281,7 +1307,7 @@ def cancel(ctx, task_id: str):
 
     console.print(f"[bold]Cancelling task: {task_id}[/bold]")
 
-    if not click.confirm("Are you sure you want to cancel this task?"):
+    if not yes and not click.confirm("Are you sure you want to cancel this task?"):
         console.print("Cancelled.")
         return
 

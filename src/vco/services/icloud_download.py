@@ -104,110 +104,167 @@ class ICloudDownloadService:
         self.timeout = timeout
         self.progress_callback = progress_callback
 
-    def download_video(self, video: VideoInfo) -> DownloadResult:
+    def download_video(self, video: VideoInfo, max_retries: int = 2) -> DownloadResult:
         """Download a single video from iCloud.
 
         Args:
             video: VideoInfo object for the video to download
+            max_retries: Maximum number of retry attempts
 
         Returns:
             DownloadResult with success status and local path
 
         Requirements: 5.1, 5.2, 5.3
         """
-        start_time = time.time()
+        for attempt in range(max_retries + 1):
+            start_time = time.time()
 
-        # Check if already local
-        if video.is_local and video.path.exists():
-            return DownloadResult(
-                uuid=video.uuid,
-                filename=video.filename,
-                success=True,
-                local_path=video.path,
-                error_message=None,
-                download_time_seconds=0.0,
-            )
-
-        # Report initial progress
-        if self.progress_callback:
-            self.progress_callback(
-                DownloadProgress(
+            # Check if already local
+            if video.is_local and video.path.exists():
+                return DownloadResult(
                     uuid=video.uuid,
                     filename=video.filename,
-                    progress_percent=0.0,
-                    downloaded_bytes=0,
-                    total_bytes=video.file_size,
+                    success=True,
+                    local_path=video.path,
+                    error_message=None,
+                    download_time_seconds=0.0,
                 )
-            )
 
-        try:
-            # Download using SwiftBridge
-            local_path = self.swift_bridge.download_from_icloud(
-                video=video,
-                timeout=self.timeout,
-            )
-
-            download_time = time.time() - start_time
-
-            # Report completion
+            # Report initial progress
             if self.progress_callback:
                 self.progress_callback(
                     DownloadProgress(
                         uuid=video.uuid,
                         filename=video.filename,
-                        progress_percent=100.0,
-                        downloaded_bytes=video.file_size,
+                        progress_percent=0.0,
+                        downloaded_bytes=0,
                         total_bytes=video.file_size,
                     )
                 )
 
-            logger.info(f"Downloaded {video.filename} in {download_time:.1f}s")
+            try:
+                # Create a progress callback wrapper for SwiftBridge
+                def swift_progress_callback(percent: int) -> None:
+                    if self.progress_callback:
+                        # Estimate downloaded bytes based on percentage
+                        downloaded_bytes = int(video.file_size * percent / 100)
+                        self.progress_callback(
+                            DownloadProgress(
+                                uuid=video.uuid,
+                                filename=video.filename,
+                                progress_percent=float(percent),
+                                downloaded_bytes=downloaded_bytes,
+                                total_bytes=video.file_size,
+                            )
+                        )
 
-            return DownloadResult(
-                uuid=video.uuid,
-                filename=video.filename,
-                success=True,
-                local_path=local_path,
-                error_message=None,
-                download_time_seconds=download_time,
-            )
+                # Download using SwiftBridge with progress callback
+                local_path = self.swift_bridge.download_from_icloud(
+                    video=video,
+                    timeout=self.timeout,
+                    progress_callback=swift_progress_callback,
+                )
 
-        except PhotosAccessError as e:
-            download_time = time.time() - start_time
-            error_msg = str(e)
+                download_time = time.time() - start_time
 
-            # Categorize error
-            if "timeout" in error_msg.lower():
-                error_msg = f"Download timed out after {self.timeout}s"
-            elif "network" in error_msg.lower():
-                error_msg = "Network connection unavailable"
-            elif "not found" in error_msg.lower():
-                error_msg = "Video not found in Photos library"
+                # Report completion
+                if self.progress_callback:
+                    self.progress_callback(
+                        DownloadProgress(
+                            uuid=video.uuid,
+                            filename=video.filename,
+                            progress_percent=100.0,
+                            downloaded_bytes=video.file_size,
+                            total_bytes=video.file_size,
+                        )
+                    )
 
-            logger.warning(f"Failed to download {video.filename}: {error_msg}")
+                logger.info(f"Downloaded {video.filename} in {download_time:.1f}s")
 
-            return DownloadResult(
-                uuid=video.uuid,
-                filename=video.filename,
-                success=False,
-                local_path=None,
-                error_message=error_msg,
-                download_time_seconds=download_time,
-            )
+                return DownloadResult(
+                    uuid=video.uuid,
+                    filename=video.filename,
+                    success=True,
+                    local_path=local_path,
+                    error_message=None,
+                    download_time_seconds=download_time,
+                )
 
-        except Exception as e:
-            download_time = time.time() - start_time
-            error_msg = f"Unexpected error: {e}"
-            logger.exception(f"Failed to download {video.filename}")
+            except PhotosAccessError as e:
+                download_time = time.time() - start_time
+                error_msg = str(e)
 
-            return DownloadResult(
-                uuid=video.uuid,
-                filename=video.filename,
-                success=False,
-                local_path=None,
-                error_message=error_msg,
-                download_time_seconds=download_time,
-            )
+                # Check if this is a retryable error
+                is_retryable = (
+                    "3169" in error_msg  # PHPhotosErrorDomain error 3169
+                    or "network" in error_msg.lower()
+                    or "timeout" in error_msg.lower()
+                    or "temporarily unavailable" in error_msg.lower()
+                )
+
+                if is_retryable and attempt < max_retries:
+                    logger.warning(
+                        f"Download attempt {attempt + 1} failed for {video.filename}: {error_msg}. Retrying..."
+                    )
+                    time.sleep(2**attempt)  # Exponential backoff
+                    continue
+
+                # Categorize error for final attempt
+                if "timeout" in error_msg.lower():
+                    error_msg = f"Download timed out after {self.timeout}s"
+                elif "network" in error_msg.lower():
+                    error_msg = "Network connection unavailable"
+                elif "not found" in error_msg.lower():
+                    error_msg = "Video not found in Photos library"
+                elif "3169" in error_msg:
+                    error_msg = "iCloud download failed (temporary service issue)"
+
+                logger.warning(
+                    f"Failed to download {video.filename} after {attempt + 1} attempts: {error_msg}"
+                )
+
+                return DownloadResult(
+                    uuid=video.uuid,
+                    filename=video.filename,
+                    success=False,
+                    local_path=None,
+                    error_message=error_msg,
+                    download_time_seconds=download_time,
+                )
+
+            except Exception as e:
+                download_time = time.time() - start_time
+                error_msg = f"Unexpected error: {e}"
+
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Download attempt {attempt + 1} failed for {video.filename}: {error_msg}. Retrying..."
+                    )
+                    time.sleep(2**attempt)
+                    continue
+
+                logger.exception(
+                    f"Failed to download {video.filename} after {attempt + 1} attempts"
+                )
+
+                return DownloadResult(
+                    uuid=video.uuid,
+                    filename=video.filename,
+                    success=False,
+                    local_path=None,
+                    error_message=error_msg,
+                    download_time_seconds=download_time,
+                )
+
+        # Fallback return (should not reach here normally)
+        return DownloadResult(
+            uuid=video.uuid,
+            filename=video.filename,
+            success=False,
+            local_path=None,
+            error_message="Download failed after all retries",
+            download_time_seconds=0.0,
+        )
 
     def download_videos(self, videos: list[VideoInfo]) -> DownloadSummary:
         """Download multiple videos from iCloud.

@@ -93,10 +93,12 @@ class TestDownloadVideo:
         assert result.error_message is None
         assert result.download_time_seconds >= 0
 
-        mock_swift_bridge.download_from_icloud.assert_called_once_with(
-            video=sample_video,
-            timeout=300,
-        )
+        # Verify download_from_icloud was called with correct video and timeout
+        mock_swift_bridge.download_from_icloud.assert_called_once()
+        call_kwargs = mock_swift_bridge.download_from_icloud.call_args.kwargs
+        assert call_kwargs["video"] == sample_video
+        assert call_kwargs["timeout"] == 300
+        assert "progress_callback" in call_kwargs  # progress_callback is passed
 
     def test_download_already_local(self, mock_swift_bridge, local_video):
         """Test that local videos are not re-downloaded."""

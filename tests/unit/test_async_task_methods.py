@@ -627,8 +627,6 @@ class TestFileStatusDownloaded:
 
     def test_from_dict_restores_downloaded_status(self):
         """from_dict should restore DOWNLOADED status."""
-        from vco.models.async_task import FileStatus
-
         data = {
             "file_id": "file-1",
             "original_uuid": "uuid-1",
@@ -638,11 +636,10 @@ class TestFileStatusDownloaded:
         }
         file = AsyncFile.from_dict(data)
         assert file.status == FileStatus.DOWNLOADED
+        assert file.status.value == "DOWNLOADED"
 
     def test_roundtrip_with_downloaded_status(self):
         """to_dict -> from_dict roundtrip should preserve DOWNLOADED status."""
-        from vco.models.async_task import FileStatus
-
         original = AsyncFile(
             file_id="file-1",
             uuid="uuid-1",
@@ -653,4 +650,5 @@ class TestFileStatusDownloaded:
         data = original.to_dict()
         restored = AsyncFile.from_dict(data)
 
-        assert restored.status == original.status
+        assert restored.status.value == original.status.value
+        assert restored.status == FileStatus.DOWNLOADED
