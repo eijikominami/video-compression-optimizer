@@ -115,6 +115,7 @@ class FileStatus(Enum):
     VERIFYING = "VERIFYING"       # 品質検証中
     COMPLETED = "COMPLETED"       # 完了
     DOWNLOADED = "DOWNLOADED"     # ダウンロード済み
+    REMOVED = "REMOVED"           # ユーザーにより削除
     FAILED = "FAILED"            # 失敗
 ```
 

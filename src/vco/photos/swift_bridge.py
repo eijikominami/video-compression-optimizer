@@ -23,7 +23,8 @@ class SwiftBridge:
     """
 
     # Default timeout for subprocess calls (seconds)
-    DEFAULT_TIMEOUT = 60
+    # Scan can take several minutes for large libraries
+    DEFAULT_TIMEOUT = 600
 
     # Timeout for iCloud downloads (seconds)
     DOWNLOAD_TIMEOUT = 300
@@ -171,10 +172,16 @@ class SwiftBridge:
         if data.get("resolution") and len(data["resolution"]) == 2:
             resolution = tuple(data["resolution"])
 
+        # Determine is_local based on path and Swift response
+        # If path is empty or "/unknown", the file is not locally available
+        path_str = data.get("path", "")
+        has_valid_path = bool(path_str) and path_str != "/unknown"
+        is_local = data.get("is_local", False) and has_valid_path
+
         return VideoInfo(
             uuid=data.get("uuid", ""),
             filename=data.get("filename", ""),
-            path=Path(data.get("path", "")) if data.get("path") else Path("/unknown"),
+            path=Path(path_str) if path_str else Path("/unknown"),
             codec=data.get("codec", "unknown"),
             resolution=resolution,
             bitrate=data.get("bitrate", 0),
@@ -185,7 +192,7 @@ class SwiftBridge:
             creation_date=creation_date,
             albums=data.get("albums", []),
             is_in_icloud=data.get("is_in_icloud", False),
-            is_local=data.get("is_local", True),
+            is_local=is_local,
             location=location,
         )
 
@@ -270,12 +277,18 @@ class SwiftBridge:
                 return video
         return None
 
-    def download_from_icloud(self, video: VideoInfo, timeout: int = 300) -> Path:
+    def download_from_icloud(
+        self,
+        video: VideoInfo,
+        timeout: int = 300,
+        progress_callback: Any | None = None,
+    ) -> Path:
         """Download video from iCloud.
 
         Args:
             video: VideoInfo object for the video to download
             timeout: Download timeout in seconds
+            progress_callback: Optional callback for progress updates (receives percent 0-100)
 
         Returns:
             Path to the downloaded video
@@ -286,17 +299,75 @@ class SwiftBridge:
         if video.is_local and video.path.exists():
             return video.path
 
-        response = self._execute_command(
-            "download",
-            {"uuid": video.uuid},
-            timeout=timeout,
-        )
+        # Use streaming mode to capture progress updates
+        request = {"command": "download", "args": {"uuid": video.uuid}}
+        request_json = json.dumps(request)
 
-        path_str = response.get("data", "")
-        if not path_str:
-            raise PhotosAccessError("Download returned empty path")
+        try:
+            process = subprocess.Popen(
+                [str(self._binary_path)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
 
-        return Path(path_str)
+            # Send command and close stdin
+            if process.stdin:
+                process.stdin.write(request_json)
+                process.stdin.close()
+
+            # Read stdout line by line for progress updates
+            final_response = None
+            if process.stdout:
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line)
+
+                        # Check if this is a progress update
+                        if data.get("type") == "progress":
+                            if progress_callback:
+                                progress_callback(data.get("percent", 0))
+                        # Check if this is the final response
+                        elif "success" in data:
+                            final_response = data
+                            break
+                    except json.JSONDecodeError:
+                        # Skip non-JSON lines
+                        continue
+
+            # Wait for process to complete with timeout
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                raise PhotosAccessError(f"Download timed out after {timeout}s")
+
+            # Handle response
+            if final_response is None:
+                stderr_output = process.stderr.read() if process.stderr else ""
+                raise PhotosAccessError(
+                    f"No response from download command. stderr: {stderr_output}"
+                )
+
+            if not final_response.get("success", False):
+                error = final_response.get("error", {})
+                error_type = error.get("type", "unknown")
+                error_message = error.get("message", "Unknown error")
+                raise PhotosAccessError(f"[{error_type}] {error_message}")
+
+            path_str = final_response.get("data", "")
+            if not path_str:
+                raise PhotosAccessError("Download returned empty path")
+
+            return Path(path_str)
+
+        except FileNotFoundError:
+            raise PhotosAccessError(f"vco-photos binary not found: {self._binary_path}")
 
     def import_video(self, video_path: Path, album_name: str | None = None) -> str:
         """Import a video into Photos library.

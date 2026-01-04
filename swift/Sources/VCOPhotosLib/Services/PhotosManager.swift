@@ -146,7 +146,10 @@ public class PhotosManager {
         var bitrate = 0
         var frameRate = 0.0
         
-        // Only try to extract metadata if file is locally available
+        // First, try to get codec from UTI (works for iCloud files without download)
+        codec = getCodecFromUTI(resources: resources)
+        
+        // Only try to extract detailed metadata if file is locally available
         if isLocal {
             let semaphore = DispatchSemaphore(value: 0)
             
@@ -318,6 +321,37 @@ public class PhotosManager {
         }
         
         return 0
+    }
+    
+    /// Get codec from UTI (Uniform Type Identifier).
+    /// NOTE: UTI only indicates container format, not the actual codec.
+    /// For iCloud files, we cannot determine codec without downloading.
+    /// Only return codec for specific UTIs that guarantee the codec.
+    private func getCodecFromUTI(resources: [PHAssetResource]) -> String {
+        // Find the video resource (prefer .video, fallback to .fullSizeVideo for iCloud)
+        guard let resource = resources.first(where: { $0.type == .video }) 
+            ?? resources.first(where: { $0.type == .fullSizeVideo }) else {
+            return "unknown"
+        }
+        
+        let uti = resource.uniformTypeIdentifier
+        
+        // Only return codec for UTIs that explicitly indicate the codec
+        // Container formats (QuickTime, MP4) can contain various codecs
+        switch uti {
+        case "public.hevc":
+            return "hvc1"  // HEVC/H.265 - explicit
+        case "public.mpeg-4-audio":
+            return "aac"  // Audio only
+        default:
+            // Check for explicit HEVC in UTI string
+            if uti.lowercased().contains("hevc") {
+                return "hvc1"
+            }
+            // Container formats like com.apple.quicktime-movie, public.mpeg-4
+            // can contain H.264, HEVC, or other codecs - cannot determine without AVAsset
+            return "unknown"
+        }
     }
     
     /// Normalize UUID by removing /L0/001 suffix to match Python implementation.

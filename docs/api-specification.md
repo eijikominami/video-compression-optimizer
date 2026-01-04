@@ -10,6 +10,98 @@ Video Compression Optimizer (VCO) provides a REST API for asynchronous video con
 
 **Authentication**: AWS Signature Version 4
 
+## Endpoints
+
+### POST /tasks
+
+Submit a new conversion task.
+
+**Request**:
+```json
+{
+  "files": [
+    {"filename": "video1.mp4", "file_size": 1048576},
+    {"filename": "video2.mov", "file_size": 2097152}
+  ],
+  "quality_preset": "balanced"
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "task_id": "123e4567-e89b-12d3-a456-426614174000",
+  "upload_urls": [
+    {
+      "file_id": "f1",
+      "filename": "video1.mp4",
+      "upload_url": "https://s3.amazonaws.com/bucket/key?signature=..."
+    }
+  ],
+  "expires_at": "2024-01-01T12:00:00Z"
+}
+```
+
+### GET /tasks/{task_id}
+
+Get task status.
+
+**Response** (200 OK):
+```json
+{
+  "task_id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "CONVERTING",
+  "quality_preset": "balanced",
+  "progress_percentage": 50,
+  "current_step": "converting",
+  "files": [
+    {
+      "file_id": "f1",
+      "filename": "video1.mp4",
+      "status": "COMPLETED",
+      "conversion_progress_percentage": 100,
+      "output_s3_key": "output/task123/f1/video1_h265.mp4"
+    }
+  ],
+  "created_at": "2024-01-01T10:00:00Z",
+  "updated_at": "2024-01-01T10:30:00Z"
+}
+```
+
+### POST /tasks/{task_id}/cancel
+
+Cancel a running task.
+
+**Response** (200 OK):
+```json
+{
+  "task_id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "CANCELLED",
+  "message": "Task cancelled successfully"
+}
+```
+
+### POST /tasks/{task_id}/files/{file_id}/cleanup
+
+Cleanup file after import or removal.
+
+**Request**:
+```json
+{
+  "action": "downloaded"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "file_id": "f1",
+  "status": "DOWNLOADED",
+  "s3_deleted": true,
+  "cleaned_at": "2024-01-01T12:00:00Z"
+}
+```
+
 ## OpenAPI Specification
 
 ```yaml
@@ -139,13 +231,6 @@ paths:
       description: |
         Atomically update file status and delete S3 file. Used after successful import
         (action=downloaded) or when removing/clearing AWS items (action=removed).
-        
-        Processing order:
-        1. Update DynamoDB status (DOWNLOADED or REMOVED)
-        2. Delete S3 file
-        
-        If status update fails, S3 deletion is skipped and error is returned.
-        If S3 deletion fails, warning is logged but success is returned (status is authoritative).
       operationId: cleanupFile
       parameters:
         - name: task_id
@@ -220,13 +305,6 @@ components:
           type: string
           enum: [balanced, high, compression, balanced+, high+]
           description: Quality preset for conversion
-      example:
-        files:
-          - filename: "video1.mp4"
-            file_size: 1048576
-          - filename: "video2.mov"
-            file_size: 2097152
-        quality_preset: "balanced"
 
     FileSubmitInfo:
       type: object
@@ -244,9 +322,6 @@ components:
           minimum: 1
           maximum: 5368709120
           description: File size in bytes (max 5GB)
-      example:
-        filename: "sample_video.mp4"
-        file_size: 1048576
 
     TaskSubmitResponse:
       type: object
@@ -268,13 +343,6 @@ components:
           type: string
           format: date-time
           description: Upload URL expiration time (ISO 8601)
-      example:
-        task_id: "123e4567-e89b-12d3-a456-426614174000"
-        upload_urls:
-          - file_id: "f1"
-            filename: "video1.mp4"
-            upload_url: "https://s3.amazonaws.com/bucket/key?signature=..."
-        expires_at: "2024-01-01T12:00:00Z"
 
     UploadUrlInfo:
       type: object
@@ -294,10 +362,6 @@ components:
           type: string
           format: uri
           description: Presigned S3 upload URL
-      example:
-        file_id: "f1"
-        filename: "video1.mp4"
-        upload_url: "https://s3.amazonaws.com/bucket/key?signature=..."
 
     TaskStatusResponse:
       type: object
@@ -345,20 +409,6 @@ components:
           type: string
           format: date-time
           description: Last update time (ISO 8601)
-      example:
-        task_id: "123e4567-e89b-12d3-a456-426614174000"
-        status: "CONVERTING"
-        quality_preset: "balanced"
-        progress_percentage: 50
-        current_step: "converting"
-        files:
-          - file_id: "f1"
-            filename: "video1.mp4"
-            status: "COMPLETED"
-            conversion_progress_percentage: 100
-            output_s3_key: "output/task123/f1/video1_h265.mp4"
-        created_at: "2024-01-01T10:00:00Z"
-        updated_at: "2024-01-01T10:30:00Z"
 
     FileStatus:
       type: object
@@ -391,7 +441,7 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-          description: Individual file conversion progress (0=PENDING, 0-30=CONVERTING, 65=VERIFYING, 100=COMPLETED/DOWNLOADED/REMOVED/FAILED)
+          description: Individual file conversion progress
         output_s3_key:
           type: string
           nullable: true
@@ -400,13 +450,6 @@ components:
           type: string
           nullable: true
           description: Error message if status is FAILED
-      example:
-        file_id: "f1"
-        filename: "video1.mp4"
-        status: "COMPLETED"
-        conversion_progress_percentage: 100
-        output_s3_key: "output/task123/f1/video1_h265.mp4"
-        error_message: null
 
     TaskCancelResponse:
       type: object
@@ -426,10 +469,6 @@ components:
         message:
           type: string
           description: Cancellation confirmation message
-      example:
-        task_id: "123e4567-e89b-12d3-a456-426614174000"
-        status: "CANCELLED"
-        message: "Task cancelled successfully"
 
     CleanupRequest:
       type: object
@@ -443,8 +482,6 @@ components:
             Cleanup action:
             - downloaded: File was successfully imported (status → DOWNLOADED)
             - removed: File was removed/cleared by user (status → REMOVED)
-      example:
-        action: "downloaded"
 
     CleanupResponse:
       type: object
@@ -469,11 +506,6 @@ components:
           type: string
           format: date-time
           description: Cleanup completion time (ISO 8601)
-      example:
-        file_id: "f1"
-        status: "DOWNLOADED"
-        s3_deleted: true
-        cleaned_at: "2024-01-01T12:00:00Z"
 
     ErrorResponse:
       type: object
@@ -490,11 +522,6 @@ components:
         details:
           type: object
           description: Additional error details
-      example:
-        error: "INVALID_QUALITY_PRESET"
-        message: "Quality preset 'invalid' is not supported"
-        details:
-          valid_presets: ["balanced", "high", "compression", "balanced+", "high+"]
 ```
 
 ## Error Codes
@@ -561,9 +588,7 @@ curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/
 curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/files/f1/cleanup \
   -H "Content-Type: application/json" \
   -H "Authorization: AWS4-HMAC-SHA256 ..." \
-  -d '{
-    "action": "downloaded"
-  }'
+  -d '{"action": "downloaded"}'
 ```
 
 ### Cleanup File (on removal)
@@ -572,9 +597,7 @@ curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/
 curl -X POST https://api.example.com/tasks/123e4567-e89b-12d3-a456-426614174000/files/f1/cleanup \
   -H "Content-Type: application/json" \
   -H "Authorization: AWS4-HMAC-SHA256 ..." \
-  -d '{
-    "action": "removed"
-  }'
+  -d '{"action": "removed"}'
 ```
 
 ## Integration Notes
@@ -591,9 +614,9 @@ The VCO CLI automatically handles:
 ### S3 Key Structure
 
 ```
-tasks/{task_id}/source/{file_id}/{filename}     # Source files
-output/{task_id}/{file_id}/{stem}_h265.mp4     # Converted files
-tasks/{task_id}/metadata/{file_id}/{filename}.json  # Metadata
+tasks/{task_id}/source/{file_id}/{filename}        # Source files
+output/{task_id}/{file_id}/{stem}_h265.mp4         # Converted files
+tasks/{task_id}/metadata/{file_id}/{filename}.json # Metadata
 ```
 
 ### DynamoDB Schema
