@@ -100,14 +100,14 @@ class StatusCommand:
     def list_tasks(
         self,
         status_filter: str | None = None,
-        limit: int = 20,
+        limit: int = 10,
         user_id: str | None = None,
     ) -> list[TaskSummary]:
         """List tasks for the user.
 
         Args:
             status_filter: Filter by status (optional)
-            limit: Maximum number of tasks to return
+            limit: Maximum number of tasks to return (default: 10)
             user_id: User identifier (defaults to machine ID)
 
         Returns:

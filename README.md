@@ -22,7 +22,6 @@ A tool to convert videos in Apple Photos to H.265 format to save storage space.
 - macOS 10.15 (Catalina) or later
 - Python 3.10 or later
 - AWS account (MediaConvert, S3, Lambda)
-- For iCloud videos, download originals in Photos app first
 
 ## Installation
 
@@ -109,37 +108,31 @@ vco convert --dry-run
 # Skip iCloud videos (process local only)
 vco convert --skip-icloud
 
-# Set download timeout for iCloud videos (default: 300 seconds)
+# Set download timeout for iCloud videos (default: 300 seconds, range: 30-3600)
 vco convert --download-timeout 600
 
 # Skip confirmation prompts
 vco convert --yes
 ```
 
-### Async Workflow
+**Automatic iCloud Download**: When running `vco convert`, iCloud-only videos are automatically downloaded using Swift PhotoKit. Use `--skip-icloud` to skip them.
 
 Conversions are processed asynchronously via AWS Step Functions. After submitting a conversion, you can check status and manage tasks:
 
 ```bash
 # Check task status
-vco status                    # List all active tasks
+vco status                    # List recent tasks (default: 10)
+vco status -n 20              # List more tasks
 vco status <task-id>          # Show task details
 
 # Cancel a running task
 vco cancel <task-id>
 
-# Import completed files (replaces vco download)
+# Import completed files
 vco import --list             # List all importable items (local + AWS)
 vco import --all              # Import all items
 vco import <task-id:file-id>  # Import specific AWS file
 ```
-
-#### Async Workflow Benefits
-
-- **Background processing**: Submit tasks and check status later
-- **Parallel conversion**: Multiple files processed concurrently
-- **Unified import**: Import from both local queue and AWS with single command
-- **Partial completion**: Import successful files even if some fail
 
 ### Import
 
@@ -188,18 +181,6 @@ vco config set conversion.quality_preset balanced
 vco config set conversion.max_concurrent 3
 ```
 
-### Legacy Mode
-
-VCO uses a native Swift implementation for Photos library access by default. If you encounter issues, you can fall back to the legacy Python implementation:
-
-```bash
-# Use legacy Python implementation
-vco scan --legacy
-vco convert --legacy
-```
-
-Note: The `--legacy` option is deprecated and will be removed in a future version.
-
 ## Quality Presets
 
 | Preset | QVBR | Use Case |
@@ -224,62 +205,6 @@ In best-effort mode, conversion is treated as successful even if SSIM threshold 
 Best-effort mode used:
   - video.mp4: preset=balanced, SSIM=0.9132
 ```
-
-## iCloud Video Processing
-
-VCO automatically downloads iCloud-only videos before conversion using the native Swift PhotoKit implementation.
-
-### Automatic Download (Default)
-
-When running `vco convert`, iCloud-only videos are automatically downloaded:
-
-```
-Found 5 iCloud videos (estimated 2.3 GB)
-Downloading iCloud videos...
-  ✓ IMG_1234.mov (500 MB)
-  ✓ IMG_5678.mov (800 MB)
-  ...
-Download complete: 5 succeeded, 0 failed
-```
-
-### Convert Options for iCloud
-
-```bash
-# Skip iCloud videos (process local only)
-vco convert --skip-icloud
-
-# Set download timeout (default: 300 seconds, range: 30-3600)
-vco convert --download-timeout 600
-
-# Skip confirmation prompts for iCloud download
-vco convert --yes
-```
-
-### Scan Behavior
-
-When running `vco scan`, each video's iCloud status (Local/iCloud) is displayed:
-
-```
-⚠ 10 videos are in iCloud only.
-These will be automatically downloaded when running 'vco convert'.
-Use '--skip-icloud' to skip iCloud videos.
-
-  - IMG_1234.mov
-  - IMG_5678.mov
-  ...
-```
-
-### Legacy Mode
-
-When using `--legacy` option (Python osxphotos implementation), automatic download is not available. iCloud-only videos are skipped with a message.
-
-### Manual Download Steps (Legacy Mode Only)
-
-1. Open Photos app
-2. Select iCloud-only videos
-3. Right-click → Select "Download Original"
-4. After download completes, re-run `vco scan` to update file paths
-5. Run `vco convert`
 
 ## Workflow
 

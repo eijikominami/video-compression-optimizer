@@ -181,6 +181,10 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "状態でフィルタ (PENDING, CONVERTING, COMPLETED, FAILED)",
         "en": "Filter by status (PENDING, CONVERTING, COMPLETED, FAILED)",
     },
+    "status.limit": {
+        "ja": "表示するタスク数 (デフォルト: 10)",
+        "en": "Number of tasks to display (default: 10)",
+    },
     "status.json": {
         "ja": "JSON形式で出力",
         "en": "Output in JSON format",

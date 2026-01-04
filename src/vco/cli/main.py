@@ -12,7 +12,7 @@ Usage:
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import click
 from rich.console import Console
@@ -25,6 +25,21 @@ from vco.photos.manager import PhotosAccessManager
 from vco.services.scan import ScanService
 
 console = Console()
+
+
+def utc_to_local(utc_dt: datetime) -> datetime:
+    """Convert UTC datetime to local timezone.
+
+    Args:
+        utc_dt: UTC datetime (naive or aware)
+
+    Returns:
+        Local timezone datetime
+    """
+    # If naive datetime, assume it's UTC
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    return utc_dt.astimezone()
 
 
 def format_size(size_bytes: int | float) -> str:
@@ -550,10 +565,8 @@ def import_cmd(
             # Source label
             source_label = "[blue]AWS[/blue]" if item.source == "aws" else "[green]Local[/green]"
 
-            # ID display (truncate for AWS)
+            # ID display (full ID for easy copy-paste)
             display_id = item.item_id
-            if item.source == "aws" and len(display_id) > 20:
-                display_id = display_id[:17] + "..."
 
             table.add_row(
                 source_label,
@@ -1136,10 +1149,11 @@ def _convert_async(ctx, candidates, quality: str, aws_config, skip_confirm: bool
 
 @cli.command()
 @click.option("--filter", "status_filter", help=get_help("status.filter"))
+@click.option("--limit", "-n", type=int, default=10, help=get_help("status.limit"))
 @click.option("--json", "output_json", is_flag=True, help=get_help("status.json"))
 @click.argument("task_id", required=False)
 @click.pass_context
-def status(ctx, status_filter: str | None, output_json: bool, task_id: str | None):
+def status(ctx, status_filter: str | None, limit: int, output_json: bool, task_id: str | None):
     """Check async task status."""
     from vco.services.async_status import StatusCommand
 
@@ -1197,11 +1211,11 @@ def status(ctx, status_filter: str | None, output_json: bool, task_id: str | Non
             console.print(f"  Progress: {task.progress_percentage}%")
             if task.current_step:
                 console.print(f"  Current Step: {task.current_step}")
-            console.print(f"  Created: {task.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            local_created = utc_to_local(task.created_at)
+            console.print(f"  Created: {local_created.strftime('%Y-%m-%d %H:%M:%S')}")
             if task.estimated_completion_time:
-                console.print(
-                    f"  Est. Completion: {task.estimated_completion_time.strftime('%H:%M:%S')}"
-                )
+                local_est = utc_to_local(task.estimated_completion_time)
+                console.print(f"  Est. Completion: {local_est.strftime('%H:%M:%S')}")
             console.print()
 
             # Display files
@@ -1225,7 +1239,7 @@ def status(ctx, status_filter: str | None, output_json: bool, task_id: str | Non
 
         else:
             # List tasks
-            tasks = status_cmd.list_tasks(status_filter=status_filter)
+            tasks = status_cmd.list_tasks(status_filter=status_filter, limit=limit)
 
             if output_json:
                 click.echo(
@@ -1253,7 +1267,7 @@ def status(ctx, status_filter: str | None, output_json: bool, task_id: str | Non
                 console.print("[green]No active tasks.[/green]")
                 return
 
-            console.print(f"[bold]Active Tasks: {len(tasks)}[/bold]")
+            console.print("[bold]Recent Tasks:[/bold]")
             console.print()
 
             table = Table()
@@ -1268,12 +1282,13 @@ def status(ctx, status_filter: str | None, output_json: bool, task_id: str | Non
                 if t.failed_count > 0:
                     files_str += f" ([red]{t.failed_count} failed[/red])"
 
+                local_created = utc_to_local(t.created_at)
                 table.add_row(
-                    t.task_id[:8] + "...",
+                    t.task_id,
                     _format_status(t.status),
                     files_str,
                     f"{t.progress_percentage}%",
-                    t.created_at.strftime("%m-%d %H:%M"),
+                    local_created.strftime("%m-%d %H:%M"),
                 )
 
             console.print(table)
@@ -1358,7 +1373,11 @@ def _format_status(status: str) -> str:
 
 def main():
     """Entry point for the CLI."""
-    cli(obj={})
+    try:
+        cli(obj={})
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/yellow]")
+        sys.exit(130)
 
 
 if __name__ == "__main__":

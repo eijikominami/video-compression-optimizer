@@ -10,6 +10,7 @@ Apple Photos 内の動画を H.265 形式に変換してストレージを節約
 ## 特徴
 
 - Apple Photos ライブラリの動画を自動スキャン
+- ネイティブ Swift PhotoKit 実装による高速で信頼性の高い Photos アクセス
 - AWS MediaConvert による高品質な H.265 変換
 - SSIM ベースの品質検証
 - メタデータ（撮影日時、位置情報、アルバム）の保持
@@ -21,7 +22,6 @@ Apple Photos 内の動画を H.265 形式に変換してストレージを節約
 - macOS 10.15 (Catalina) 以降
 - Python 3.10 以降
 - AWS アカウント（MediaConvert、S3、Lambda）
-- iCloud 動画を変換する場合は、事前に Photos アプリで「オリジナルをダウンロード」を実行
 
 ## インストール
 
@@ -104,32 +104,35 @@ vco convert --top-n 5
 
 # ドライラン（実際の変換なし）
 vco convert --dry-run
+
+# iCloud 動画をスキップ（ローカルのみ処理）
+vco convert --skip-icloud
+
+# iCloud ダウンロードのタイムアウトを設定（デフォルト: 300 秒、範囲: 30-3600）
+vco convert --download-timeout 600
+
+# 確認プロンプトをスキップ
+vco convert --yes
 ```
 
-### 非同期ワークフロー
+**iCloud 動画の自動ダウンロード**: `vco convert` を実行すると、iCloud のみの動画は Swift PhotoKit を使用して自動的にダウンロードされます。`--skip-icloud` でスキップ可能です。
 
 変換は AWS Step Functions を通じて非同期で処理されます。変換を送信した後、状態を確認してタスクを管理できます：
 
 ```bash
 # タスク状態を確認
-vco status                    # アクティブなタスク一覧
+vco status                    # 直近のタスク一覧（デフォルト: 10件）
+vco status -n 20              # 表示件数を指定
 vco status <task-id>          # タスク詳細を表示
 
 # 実行中のタスクをキャンセル
 vco cancel <task-id>
 
-# 完了したファイルをインポート（vco download の代替）
+# 完了したファイルをインポート
 vco import --list             # インポート可能なアイテム一覧（ローカル + AWS）
 vco import --all              # 全アイテムをインポート
 vco import <task-id:file-id>  # 特定の AWS ファイルをインポート
 ```
-
-#### 非同期ワークフローの利点
-
-- **バックグラウンド処理**: タスクを送信して後で状態を確認
-- **並列変換**: 複数ファイルを同時に処理
-- **統合インポート**: ローカルと AWS の両方を単一コマンドでインポート
-- **部分完了**: 一部失敗しても成功したファイルをインポート可能
 
 ### インポート
 
@@ -203,35 +206,6 @@ Best-effort mode used:
   - video.mp4: preset=balanced, SSIM=0.9132
 ```
 
-## iCloud 動画の処理
-
-iCloud にのみ保存されている動画（ローカルにダウンロードされていない動画）は自動的にダウンロードできません。これは osxphotos ライブラリの制限です。
-
-### スキャン時の動作
-
-`vco scan` を実行すると、各動画の iCloud 状態（Local/iCloud）が表示されます：
-
-```
-⚠ 10 videos are in iCloud only and need to be downloaded first.
-Open Photos app and download these videos before running 'vco convert':
-
-  - IMG_1234.mov
-  - IMG_5678.mov
-  ...
-```
-
-### 変換時の動作
-
-`vco convert` を実行すると、ローカルで利用可能な動画のみが変換されます。iCloud のみの動画はスキップされます。
-
-### 手動ダウンロード手順
-
-1. Photos アプリを開く
-2. iCloud のみの動画を選択
-3. 右クリック → 「オリジナルをダウンロード」を選択
-4. ダウンロード完了後、`vco scan` を再実行してファイルパスを更新
-5. `vco convert` を実行
-
 ## ワークフロー
 
 ### 基本的な使い方
@@ -280,6 +254,22 @@ CLI はシステムロケールを自動検出します：
 **注意**: 出力メッセージ（進捗、結果、エラー）は一貫性と検索性のため、常に英語で表示されます。
 
 ## 開発
+
+### Swift バイナリのビルド
+
+開発時は Swift バイナリを手動でビルドできます：
+
+```bash
+cd swift
+
+# 現在のアーキテクチャ用にビルド
+swift build
+
+# Universal Binary をビルド（arm64 + x86_64）
+./scripts/build_swift.sh
+```
+
+ビルドされたバイナリは `bin/vco-photos` に配置されます。
 
 ### テスト実行
 
