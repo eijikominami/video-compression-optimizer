@@ -26,7 +26,6 @@ class TestAsyncModuleImports:
         "vco.services.async_convert",
         "vco.services.async_status",
         "vco.services.async_cancel",
-        "vco.services.async_download",
         "vco.services.download_progress",
         "vco.services.error_handling",
     ]
@@ -113,12 +112,6 @@ class TestAsyncModuleImports:
         from vco.services import async_cancel
 
         assert async_cancel is not None
-
-    def test_async_download_service_exists(self):
-        """async_download module should be importable."""
-        from vco.services import async_download
-
-        assert async_download is not None
 
     def test_download_progress_service_exists(self):
         """download_progress module should be importable."""

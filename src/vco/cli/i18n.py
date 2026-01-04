@@ -77,10 +77,6 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "JSON形式で出力",
         "en": "Output in JSON format",
     },
-    "scan.legacy": {
-        "ja": "[非推奨] レガシー Python 実装を使用",
-        "en": "[Deprecated] Use legacy Python implementation",
-    },
     # convert command
     "convert.description": {
         "ja": "変換候補の動画を H.265 に変換\n\n"
@@ -101,6 +97,18 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
     "convert.dry_run": {
         "ja": "実際の変換を行わずにシミュレーション",
         "en": "Simulate without actual conversion",
+    },
+    "convert.skip_icloud": {
+        "ja": "iCloud のみの動画をスキップ（ダウンロードしない）",
+        "en": "Skip iCloud-only videos (do not download)",
+    },
+    "convert.download_timeout": {
+        "ja": "iCloud ダウンロードのタイムアウト（秒）",
+        "en": "Timeout for iCloud downloads in seconds",
+    },
+    "convert.yes": {
+        "ja": "確認プロンプトをスキップ",
+        "en": "Skip confirmation prompts",
     },
     # import command
     "import.description": {
@@ -141,6 +149,10 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "JSON形式で出力",
         "en": "Output in JSON format",
     },
+    "import.yes": {
+        "ja": "確認プロンプトをスキップ",
+        "en": "Skip confirmation prompts",
+    },
     # config command
     "config.description": {
         "ja": "設定を表示または変更",
@@ -169,6 +181,10 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "状態でフィルタ (PENDING, CONVERTING, COMPLETED, FAILED)",
         "en": "Filter by status (PENDING, CONVERTING, COMPLETED, FAILED)",
     },
+    "status.limit": {
+        "ja": "表示するタスク数 (デフォルト: 10)",
+        "en": "Number of tasks to display (default: 10)",
+    },
     "status.json": {
         "ja": "JSON形式で出力",
         "en": "Output in JSON format",
@@ -177,5 +193,9 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
     "cancel.description": {
         "ja": "実行中の非同期タスクをキャンセル",
         "en": "Cancel a running async task",
+    },
+    "cancel.yes": {
+        "ja": "確認プロンプトをスキップ",
+        "en": "Skip confirmation prompts",
     },
 }

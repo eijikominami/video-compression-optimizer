@@ -33,6 +33,7 @@ class ConversionConfig:
         quality_preset: Quality preset (high, balanced, compression)
         max_concurrent: Maximum concurrent conversions (1-10)
         staging_folder: Folder for converted files awaiting review
+        download_timeout: Timeout for iCloud downloads in seconds
     """
 
     quality_preset: str = "balanced"
@@ -42,6 +43,7 @@ class ConversionConfig:
             Path.home() / "Movies" / "VideoCompressionOptimizer" / "converted"
         )
     )
+    download_timeout: int = 300
 
     def __post_init__(self):
         """Validate configuration values."""
@@ -54,6 +56,10 @@ class ConversionConfig:
         if not 1 <= self.max_concurrent <= 10:
             raise ValueError(
                 f"Invalid max_concurrent: {self.max_concurrent}. Must be between 1 and 10"
+            )
+        if not 30 <= self.download_timeout <= 3600:
+            raise ValueError(
+                f"Invalid download_timeout: {self.download_timeout}. Must be between 30 and 3600"
             )
 
     @property
@@ -140,6 +146,7 @@ class ConfigManager:
                 "staging_folder",
                 str(Path.home() / "Movies" / "VideoCompressionOptimizer" / "converted"),
             ),
+            download_timeout=conversion_data.get("download_timeout", 300),
             # Note: default_convert_mode is ignored for backward compatibility
         )
 
@@ -171,6 +178,7 @@ class ConfigManager:
                 "quality_preset": config.conversion.quality_preset,
                 "max_concurrent": config.conversion.max_concurrent,
                 "staging_folder": config.conversion.staging_folder,
+                "download_timeout": config.conversion.download_timeout,
             },
         }
 
@@ -250,6 +258,12 @@ class ConfigManager:
                 value = int(value)
                 if not 1 <= value <= 10:
                     raise ValueError(f"Invalid max_concurrent: {value}. Must be between 1 and 10")
+            if name == "download_timeout":
+                value = int(value)
+                if not 30 <= value <= 3600:
+                    raise ValueError(
+                        f"Invalid download_timeout: {value}. Must be between 30 and 3600"
+                    )
 
         setattr(section_obj, name, value)
 

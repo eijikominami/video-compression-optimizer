@@ -10,19 +10,38 @@ public class ICloudDownloader {
     
     private init() {}
     
+    // MARK: - Progress Tracking
+    
+    /// State for throttling progress output
+    private var lastProgressPercent: Int = -1
+    private var lastProgressTime: Date = Date.distantPast
+    
+    /// Output progress JSON to stdout
+    private func outputProgress(uuid: String, percent: Int) {
+        let progressJson = "{\"type\":\"progress\",\"uuid\":\"\(uuid)\",\"percent\":\(percent)}"
+        print(progressJson)
+        fflush(stdout)
+    }
+    
     // MARK: - Download
     
     /// Download a video from iCloud.
     /// - Parameters:
     ///   - asset: The PHAsset to download
+    ///   - uuid: The UUID for progress reporting
     ///   - progressHandler: Optional handler for progress updates (0.0 to 1.0)
     ///   - timeout: Timeout in seconds (default: 300)
     /// - Returns: URL to the downloaded video file
     public func downloadVideo(
         asset: PHAsset,
+        uuid: String,
         progressHandler: ((Double) -> Void)? = nil,
         timeout: TimeInterval = 300
     ) async throws -> URL {
+        // Reset progress tracking state
+        lastProgressPercent = -1
+        lastProgressTime = Date.distantPast
+        
         return try await withCheckedThrowingContinuation { continuation in
             let options = PHVideoRequestOptions()
             options.version = .current
@@ -30,18 +49,25 @@ public class ICloudDownloader {
             options.isNetworkAccessAllowed = true
             
             // Set up progress handler
-            options.progressHandler = { progress, error, _, _ in
+            options.progressHandler = { [self] progress, error, _, _ in
                 if let error = error {
                     // Report progress error to stderr
                     FileHandle.standardError.write(
                         "Download error: \(error.localizedDescription)\n".data(using: .utf8)!
                     )
                 } else {
-                    // Report progress to stderr
                     let progressPercent = Int(progress * 100)
-                    FileHandle.standardError.write(
-                        "Downloading: \(progressPercent)%\n".data(using: .utf8)!
-                    )
+                    let now = Date()
+                    
+                    // Output progress if changed by 5% or 2 seconds elapsed
+                    if progressPercent - lastProgressPercent >= 5 ||
+                       now.timeIntervalSince(lastProgressTime) >= 2.0 ||
+                       progressPercent == 100 {
+                        outputProgress(uuid: uuid, percent: progressPercent)
+                        lastProgressPercent = progressPercent
+                        lastProgressTime = now
+                    }
+                    
                     progressHandler?(progress)
                 }
             }
@@ -91,6 +117,6 @@ public class ICloudDownloader {
         timeout: TimeInterval = 300
     ) async throws -> URL {
         let asset = try PhotosManager.shared.findAsset(byUUID: uuid)
-        return try await downloadVideo(asset: asset, progressHandler: progressHandler, timeout: timeout)
+        return try await downloadVideo(asset: asset, uuid: uuid, progressHandler: progressHandler, timeout: timeout)
     }
 }

@@ -265,6 +265,11 @@ class AsyncConvertCommand:
     def _extract_metadata(self, video) -> VideoMetadata:
         """Extract metadata from video.
 
+        Photos metadata is prioritized over FFprobe results because:
+        - Photos database reflects user's intended capture date (may be edited)
+        - iCloud-downloaded temp files may have incorrect creation_time
+        - FFprobe only used as fallback when Photos metadata is unavailable
+
         Args:
             video: Video object from candidate
 
@@ -275,12 +280,12 @@ class AsyncConvertCommand:
             metadata = self.metadata_manager.extract_metadata(video.path)
             metadata.albums = video.albums
 
-            # Use Photos metadata as fallback
-            if metadata.capture_date is None and video.capture_date:
+            # Prioritize Photos metadata over FFprobe results
+            if video.capture_date:
                 metadata.capture_date = video.capture_date
-            if metadata.creation_date is None and video.creation_date:
+            if video.creation_date:
                 metadata.creation_date = video.creation_date
-            if metadata.location is None and video.location:
+            if video.location:
                 metadata.location = video.location
 
             return metadata

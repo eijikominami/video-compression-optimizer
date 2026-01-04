@@ -1,7 +1,6 @@
-"""Unified Import Service for local and AWS imports.
+"""Unified Import Service for AWS imports.
 
-This service integrates ImportService (local) and AwsImportService (AWS)
-to provide a unified interface for importing videos from both sources.
+This service provides a unified interface for importing videos from AWS.
 
 Requirements: 1.1, 2.1, 3.1, 4.1, 7.1, 7.6
 """
@@ -22,20 +21,19 @@ from vco.models.types import (
     UnifiedListResult,
     UnifiedRemoveResult,
 )
-from vco.photos.manager import PhotosAccessError, PhotosAccessManager
+from vco.photos.manager import PhotosAccessError
+from vco.photos.swift_bridge import SwiftBridge
 from vco.services.aws_import import AwsImportService
-from vco.services.import_service import ImportService
-from vco.services.review import ReviewItem
 
 logger = logging.getLogger(__name__)
 
 
 class UnifiedImportService:
-    """Service for unified import from local and AWS sources.
+    """Service for unified import from AWS sources.
 
-    Integrates ImportService and AwsImportService to provide:
-    - Unified listing of importable items
-    - Single item import (local or AWS)
+    Provides:
+    - Listing of importable items from AWS
+    - Single item import from AWS
     - Batch import with parallel AWS downloads
     - Queue management (remove, clear)
 
@@ -44,35 +42,29 @@ class UnifiedImportService:
 
     def __init__(
         self,
-        local_service: ImportService | None = None,
         aws_service: AwsImportService | None = None,
-        photos_manager: PhotosAccessManager | None = None,
+        swift_bridge: SwiftBridge | None = None,
     ):
         """Initialize UnifiedImportService.
 
         Args:
-            local_service: ImportService for local imports
             aws_service: AwsImportService for AWS imports (optional)
-            photos_manager: PhotosAccessManager for Photos operations
+            swift_bridge: SwiftBridge for Photos operations
         """
-        self.local_service = local_service or ImportService()
         self.aws_service = aws_service
-        self.photos_manager = photos_manager or PhotosAccessManager()
+        self.swift_bridge = swift_bridge or SwiftBridge()
 
     def list_all_importable(self, user_id: str | None = None) -> UnifiedListResult:
-        """List all importable items from local and AWS sources.
+        """List all importable items from AWS sources.
 
         Args:
             user_id: User identifier for AWS (defaults to machine ID)
 
         Returns:
-            UnifiedListResult with items from both sources
+            UnifiedListResult with items from AWS
 
         Requirements: 1.1, 1.5
         """
-        # Get local items
-        local_items = self._get_local_items()
-
         # Get AWS items
         aws_items: list[ImportableItem] = []
         aws_available = True
@@ -87,7 +79,7 @@ class UnifiedImportService:
                 aws_error = str(e)
 
         return UnifiedListResult(
-            local_items=local_items,
+            local_items=[],
             aws_items=aws_items,
             aws_available=aws_available,
             aws_error=aws_error,
@@ -99,10 +91,9 @@ class UnifiedImportService:
         user_id: str | None = None,
         progress_callback: Callable[..., Any] | None = None,
     ) -> UnifiedImportResult:
-        """Import a single item from local or AWS source.
+        """Import a single item from AWS source.
 
         Item ID format:
-        - Local: review_id (no colon)
         - AWS: task_id:file_id (contains colon)
 
         Args:
@@ -115,26 +106,33 @@ class UnifiedImportService:
 
         Requirements: 2.1, 3.1
         """
-        if self._is_aws_item(item_id):
-            return self._import_aws_item(item_id, user_id, progress_callback)
-        else:
-            return self._import_local_item(item_id)
+        if not self._is_aws_item(item_id):
+            return UnifiedImportResult(
+                success=False,
+                item_id=item_id,
+                source="local",
+                original_filename="",
+                converted_filename="",
+                error_message="Local imports are not supported. Use AWS item ID format (task_id:file_id).",
+            )
+        return self._import_aws_item(item_id, user_id, progress_callback)
 
     def import_all(
         self,
         user_id: str | None = None,
         max_concurrent_downloads: int = 3,
         progress_callback: Callable[..., Any] | None = None,
+        status_callback: Callable[[str, str], None] | None = None,
     ) -> UnifiedBatchResult:
-        """Import all items from local and AWS sources.
+        """Import all items from AWS sources.
 
-        Local items are processed sequentially.
         AWS items are downloaded in parallel (up to max_concurrent_downloads).
 
         Args:
             user_id: User identifier for AWS
             max_concurrent_downloads: Maximum concurrent AWS downloads
             progress_callback: Callback for download progress
+            status_callback: Callback for status updates (filename, status)
 
         Returns:
             UnifiedBatchResult
@@ -146,16 +144,6 @@ class UnifiedImportService:
         # Get all items
         list_result = self.list_all_importable(user_id)
 
-        # Process local items sequentially
-        result.local_total = len(list_result.local_items)
-        for item in list_result.local_items:
-            import_result = self._import_local_item(item.item_id)
-            result.results.append(import_result)
-            if import_result.success:
-                result.local_successful += 1
-            else:
-                result.local_failed += 1
-
         # Process AWS items in parallel
         result.aws_total = len(list_result.aws_items)
         if list_result.aws_items and self.aws_service:
@@ -164,6 +152,7 @@ class UnifiedImportService:
                 user_id,
                 max_concurrent_downloads,
                 progress_callback,
+                status_callback,
             )
             for import_result in aws_results:
                 result.results.append(import_result)
@@ -175,7 +164,7 @@ class UnifiedImportService:
         return result
 
     def remove_item(self, item_id: str, user_id: str | None = None) -> UnifiedRemoveResult:
-        """Remove a single item from local or AWS source.
+        """Remove a single item from AWS source.
 
         Args:
             item_id: Item ID to remove
@@ -186,15 +175,19 @@ class UnifiedImportService:
 
         Requirements: 7.1, 7.2, 7.3
         """
-        if self._is_aws_item(item_id):
-            return self._remove_aws_item(item_id, user_id)
-        else:
-            return self._remove_local_item(item_id)
+        if not self._is_aws_item(item_id):
+            return UnifiedRemoveResult(
+                success=False,
+                item_id=item_id,
+                source="local",
+                error_message="Local items are not supported. Use AWS item ID format (task_id:file_id).",
+            )
+        return self._remove_aws_item(item_id, user_id)
 
     def clear_all_queues(self, user_id: str | None = None) -> UnifiedClearResult:
-        """Clear all items from both local and AWS sources.
+        """Clear all items from AWS sources.
 
-        Deletes local files and S3 files, updates AWS file statuses to REMOVED.
+        Deletes S3 files and updates AWS file statuses to REMOVED.
 
         Args:
             user_id: User identifier for AWS
@@ -208,9 +201,6 @@ class UnifiedImportService:
         list_result = self.list_all_importable(user_id)
 
         aws_items = [item for item in list_result.all_items if item.source == "aws"]
-
-        # Clear local queue (includes file deletion)
-        local_result = self.local_service.clear_queue()
 
         # Clear AWS items using cleanup API
         aws_files_deleted = 0
@@ -244,14 +234,14 @@ class UnifiedImportService:
                     logger.warning(f"Failed to remove AWS item {item.item_id}: {e}")
 
         return UnifiedClearResult(
-            success=local_result.success,
-            local_items_removed=local_result.items_removed,
-            local_files_deleted=local_result.files_deleted,
-            local_files_failed=local_result.files_failed,
+            success=True,
+            local_items_removed=0,
+            local_files_deleted=0,
+            local_files_failed=0,
             aws_items_removed=len(aws_items),
             aws_files_deleted=aws_files_deleted,
             aws_files_failed=aws_files_failed,
-            error_details=local_result.error_details + aws_error_details,
+            error_details=aws_error_details,
         )
 
     # =========================================================================
@@ -269,54 +259,12 @@ class UnifiedImportService:
             raise ValueError(f"Invalid AWS item ID format: {item_id}")
         return parts[0], parts[1]
 
-    def _get_local_items(self) -> list[ImportableItem]:
-        """Convert local ReviewItems to ImportableItems."""
-        items: list[ImportableItem] = []
-        pending = self.local_service.list_pending()
-
-        for review_item in pending:
-            item = self._review_item_to_importable(review_item)
-            items.append(item)
-
-        return items
-
-    def _review_item_to_importable(self, review_item: ReviewItem) -> ImportableItem:
-        """Convert ReviewItem to ImportableItem."""
-        metadata = VideoMetadata.from_dict(review_item.metadata)
-
-        return ImportableItem(
-            item_id=review_item.id,
-            source="local",
-            original_filename=review_item.original_path.name,
-            converted_filename=review_item.converted_path.name,
-            original_size=review_item.quality_result.get("original_size", 0),
-            converted_size=review_item.quality_result.get("converted_size", 0),
-            compression_ratio=review_item.quality_result.get("compression_ratio", 0.0),
-            ssim_score=review_item.quality_result.get("ssim_score", 0.0),
-            albums=metadata.albums or [],
-            capture_date=metadata.capture_date,
-            converted_path=review_item.converted_path,
-        )
-
-    def _import_local_item(self, review_id: str) -> UnifiedImportResult:
-        """Import a local item using ImportService."""
-        result = self.local_service.import_single(review_id)
-
-        return UnifiedImportResult(
-            success=result.success,
-            item_id=review_id,
-            source="local",
-            original_filename=result.original_filename,
-            converted_filename=result.converted_filename,
-            albums=result.albums,
-            error_message=result.error_message,
-        )
-
     def _import_aws_item(
         self,
         item_id: str,
         user_id: str | None,
         progress_callback: Callable[..., Any] | None,
+        status_callback: Callable[[str, str], None] | None = None,
     ) -> UnifiedImportResult:
         """Import an AWS item: download, import to Photos, delete S3."""
         if not self.aws_service:
@@ -374,9 +322,13 @@ class UnifiedImportService:
                 checksum_verified=download_result.checksum_verified,
             )
 
+        # Notify status: importing to Photos
+        if status_callback:
+            status_callback(local_path.name, "importing")
+
         # Import to Photos
         try:
-            new_uuid = self.photos_manager.import_video(video_path=local_path)
+            new_uuid = self.swift_bridge.import_video(video_path=local_path)
             if not new_uuid:
                 return UnifiedImportResult(
                     success=False,
@@ -401,11 +353,25 @@ class UnifiedImportService:
                     metadata = VideoMetadata.from_dict(metadata_dict)
                     if metadata and metadata.albums:
                         albums = metadata.albums
-                        self.photos_manager.add_to_albums(new_uuid, albums)
+                        self.swift_bridge.add_to_albums(new_uuid, albums)
                 except Exception as e:
                     logger.warning(f"Failed to load metadata or add to albums: {e}")
 
         except PhotosAccessError as e:
+            return UnifiedImportResult(
+                success=False,
+                item_id=item_id,
+                source="aws",
+                original_filename="",
+                converted_filename=local_path.name,
+                error_message=str(e),
+                downloaded=True,
+                download_resumed=download_result.download_resumed,
+                checksum_verified=download_result.checksum_verified,
+            )
+        except Exception as e:
+            # Catch any other exceptions during Photos import
+            logger.warning(f"Unexpected error during Photos import: {e}")
             return UnifiedImportResult(
                 success=False,
                 item_id=item_id,
@@ -464,6 +430,7 @@ class UnifiedImportService:
         user_id: str | None,
         max_concurrent: int,
         progress_callback: Callable[..., Any] | None,
+        status_callback: Callable[[str, str], None] | None = None,
     ) -> list[UnifiedImportResult]:
         """Import AWS items in parallel with concurrency limit."""
         results: list[UnifiedImportResult] = []
@@ -475,6 +442,7 @@ class UnifiedImportService:
                     item.item_id,
                     user_id,
                     progress_callback,
+                    status_callback,
                 ): item
                 for item in items
             }
@@ -507,25 +475,6 @@ class UnifiedImportService:
                     )
 
         return results
-
-    def _remove_local_item(self, review_id: str) -> UnifiedRemoveResult:
-        """Remove a local item using ImportService."""
-        result = self.local_service.remove_item(review_id)
-
-        file_deleted = False
-        metadata_deleted = False
-        if result.files_deleted:
-            file_deleted = result.files_deleted.video_deleted
-            metadata_deleted = result.files_deleted.metadata_deleted
-
-        return UnifiedRemoveResult(
-            success=result.success,
-            item_id=review_id,
-            source="local",
-            file_deleted=file_deleted,
-            metadata_deleted=metadata_deleted,
-            error_message=result.error_message,
-        )
 
     def _remove_aws_item(self, item_id: str, user_id: str | None) -> UnifiedRemoveResult:
         """Remove an AWS item by updating status and deleting S3 file via cleanup API."""

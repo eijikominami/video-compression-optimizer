@@ -28,7 +28,6 @@ classifiers = [
 dependencies = [
     "click>=8.0",
     "osxphotos>=0.60",
-    "photoscript>=0.3",
     "boto3>=1.26",
     "ffmpeg-python>=0.2",
     "rich>=13.0",
