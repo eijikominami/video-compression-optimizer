@@ -196,6 +196,7 @@ class TestAllKeysHaveTranslations:
         "config.set.description",
         "status.description",
         "status.filter",
+        "status.limit",
         "status.json",
         "cancel.description",
         "cancel.yes",

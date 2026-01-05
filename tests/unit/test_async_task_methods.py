@@ -24,17 +24,26 @@ from vco.models.async_task import (
 
 
 class TestAsyncTaskCalculateProgress:
-    """Test AsyncTask.calculate_progress() method."""
+    """Test AsyncTask.calculate_progress() method.
+
+    Progress breakdown per file (updated for Phase 9):
+    - PENDING: 0%
+    - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete, default 32%)
+    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
+    - COMPLETED/FAILED: 100%
+
+    Task overall progress is the average of all file progress values.
+    """
 
     def test_pending_status_returns_zero(self):
         """PENDING status should return 0% progress."""
         task = self._create_task(TaskStatus.PENDING, [])
         assert task.calculate_progress() == 0
 
-    def test_uploading_status_returns_ten(self):
-        """UPLOADING status should return 10% progress."""
+    def test_uploading_status_returns_five(self):
+        """UPLOADING status should return 5% progress."""
         task = self._create_task(TaskStatus.UPLOADING, [])
-        assert task.calculate_progress() == 10
+        assert task.calculate_progress() == 5
 
     def test_completed_status_returns_hundred(self):
         """COMPLETED status should return 100% progress."""
@@ -56,101 +65,98 @@ class TestAsyncTaskCalculateProgress:
         task = self._create_task(TaskStatus.CANCELLED, [], progress_percentage=30)
         assert task.calculate_progress() == 30
 
-    def test_converting_with_empty_files_returns_ten(self):
-        """CONVERTING with empty files should return 10%."""
+    def test_converting_with_empty_files_returns_zero(self):
+        """CONVERTING with empty files should return 0%."""
         task = self._create_task(TaskStatus.CONVERTING, [])
-        assert task.calculate_progress() == 10
+        assert task.calculate_progress() == 0
 
-    def test_converting_with_no_completed_files(self):
-        """CONVERTING with no completed files should return 10%."""
+    def test_converting_file_returns_default_progress(self):
+        """CONVERTING file should return default 32% (midpoint of 0-65%)."""
+        files = [self._create_file("f1", FileStatus.CONVERTING)]
+        task = self._create_task(TaskStatus.CONVERTING, files)
+        assert task.calculate_progress() == 32
+
+    def test_converting_with_mixed_files(self):
+        """CONVERTING with mixed file statuses should average correctly."""
         files = [
-            self._create_file("f1", FileStatus.CONVERTING),
-            self._create_file("f2", FileStatus.CONVERTING),
+            self._create_file("f1", FileStatus.COMPLETED),  # 100%
+            self._create_file("f2", FileStatus.CONVERTING),  # 32%
         ]
         task = self._create_task(TaskStatus.CONVERTING, files)
-        assert task.calculate_progress() == 10
+        # (100 + 32) / 2 = 66
+        assert task.calculate_progress() == 66
 
-    def test_converting_with_half_completed_files(self):
-        """CONVERTING with 50% completed files should return ~45%."""
+    def test_verifying_file_with_zero_progress(self):
+        """VERIFYING file with verification_progress=0 should return 65%."""
+        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=0)]
+        task = self._create_task(TaskStatus.VERIFYING, files)
+        # 65 + (0 * 0.34) = 65
+        assert task.calculate_progress() == 65
+
+    def test_verifying_file_with_thirty_progress(self):
+        """VERIFYING file with verification_progress=30 should return 75%."""
+        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=30)]
+        task = self._create_task(TaskStatus.VERIFYING, files)
+        # 65 + (30 * 0.34) = 65 + 10.2 = 75
+        assert task.calculate_progress() == 75
+
+    def test_verifying_file_with_hundred_progress(self):
+        """VERIFYING file with verification_progress=100 should return 99%."""
+        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=100)]
+        task = self._create_task(TaskStatus.VERIFYING, files)
+        # 65 + (100 * 0.34) = 65 + 34 = 99
+        assert task.calculate_progress() == 99
+
+    def test_verifying_with_mixed_progress(self):
+        """VERIFYING with mixed verification_progress should average correctly."""
         files = [
-            self._create_file("f1", FileStatus.COMPLETED),
-            self._create_file("f2", FileStatus.CONVERTING),
-        ]
-        task = self._create_task(TaskStatus.CONVERTING, files)
-        # 10 + (0.5 * 70) = 45
-        assert task.calculate_progress() == 45
-
-    def test_converting_with_all_completed_files(self):
-        """CONVERTING with all completed files should return 80%."""
-        files = [
-            self._create_file("f1", FileStatus.COMPLETED),
-            self._create_file("f2", FileStatus.COMPLETED),
-        ]
-        task = self._create_task(TaskStatus.CONVERTING, files)
-        # 10 + (1.0 * 70) = 80
-        assert task.calculate_progress() == 80
-
-    def test_converting_counts_failed_as_completed(self):
-        """CONVERTING should count FAILED files as completed (terminal state)."""
-        files = [
-            self._create_file("f1", FileStatus.COMPLETED),
-            self._create_file("f2", FileStatus.FAILED),
-        ]
-        task = self._create_task(TaskStatus.CONVERTING, files)
-        # Both are terminal states, so 100% file completion
-        # 10 + (1.0 * 70) = 80
-        assert task.calculate_progress() == 80
-
-    def test_verifying_with_empty_files_returns_eighty(self):
-        """VERIFYING with empty files should return 80%."""
-        task = self._create_task(TaskStatus.VERIFYING, [])
-        assert task.calculate_progress() == 80
-
-    def test_verifying_with_no_verified_files(self):
-        """VERIFYING with no verified files should return 80%."""
-        files = [
-            self._create_file("f1", FileStatus.COMPLETED),
-            self._create_file("f2", FileStatus.COMPLETED),
+            self._create_file("f1", FileStatus.VERIFYING, verification_progress=0),  # 65%
+            self._create_file("f2", FileStatus.VERIFYING, verification_progress=100),  # 99%
         ]
         task = self._create_task(TaskStatus.VERIFYING, files)
-        assert task.calculate_progress() == 80
+        # (65 + 99) / 2 = 82
+        assert task.calculate_progress() == 82
 
-    def test_verifying_with_half_verified_files(self):
-        """VERIFYING with 50% verified files should return ~87%."""
-        files = [
-            self._create_file("f1", FileStatus.COMPLETED, quality_result={"ssim": 0.98}),
-            self._create_file("f2", FileStatus.COMPLETED),
-        ]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # 80 + (0.5 * 15) = 87
-        assert task.calculate_progress() == 87
-
-    def test_verifying_with_all_verified_files(self):
-        """VERIFYING with all verified files should return 95%."""
-        files = [
-            self._create_file("f1", FileStatus.COMPLETED, quality_result={"ssim": 0.98}),
-            self._create_file("f2", FileStatus.COMPLETED, quality_result={"ssim": 0.96}),
-        ]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # 80 + (1.0 * 15) = 95
-        assert task.calculate_progress() == 95
-
-    # Boundary tests
-    def test_converting_with_single_file(self):
-        """CONVERTING with single file should calculate correctly."""
+    def test_completed_file_returns_hundred(self):
+        """COMPLETED file should return 100%."""
         files = [self._create_file("f1", FileStatus.COMPLETED)]
         task = self._create_task(TaskStatus.CONVERTING, files)
-        # 10 + (1.0 * 70) = 80
-        assert task.calculate_progress() == 80
+        assert task.calculate_progress() == 100
 
-    def test_converting_with_many_files(self):
-        """CONVERTING with many files should calculate correctly."""
-        # 100 files, 25 completed
-        files = [self._create_file(f"f{i}", FileStatus.COMPLETED) for i in range(25)]
-        files += [self._create_file(f"f{i}", FileStatus.CONVERTING) for i in range(25, 100)]
+    def test_failed_file_returns_hundred(self):
+        """FAILED file should return 100% (terminal state)."""
+        files = [self._create_file("f1", FileStatus.FAILED)]
         task = self._create_task(TaskStatus.CONVERTING, files)
-        # 10 + (0.25 * 70) = 27
-        assert task.calculate_progress() == 27
+        assert task.calculate_progress() == 100
+
+    def test_downloaded_file_returns_hundred(self):
+        """DOWNLOADED file should return 100%."""
+        files = [self._create_file("f1", FileStatus.DOWNLOADED)]
+        task = self._create_task(TaskStatus.COMPLETED, files)
+        assert task.calculate_progress() == 100
+
+    def test_pending_file_returns_zero(self):
+        """PENDING file should return 0%."""
+        files = [self._create_file("f1", FileStatus.PENDING)]
+        task = self._create_task(TaskStatus.CONVERTING, files)
+        assert task.calculate_progress() == 0
+
+    # Boundary tests
+    def test_single_file_progress(self):
+        """Single file progress should be calculated correctly."""
+        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=50)]
+        task = self._create_task(TaskStatus.VERIFYING, files)
+        # 65 + (50 * 0.34) = 65 + 17 = 82
+        assert task.calculate_progress() == 82
+
+    def test_many_files_progress(self):
+        """Many files progress should average correctly."""
+        # 10 files: 5 COMPLETED (100%), 5 CONVERTING (32%)
+        files = [self._create_file(f"f{i}", FileStatus.COMPLETED) for i in range(5)]
+        files += [self._create_file(f"f{i}", FileStatus.CONVERTING) for i in range(5, 10)]
+        task = self._create_task(TaskStatus.CONVERTING, files)
+        # (5 * 100 + 5 * 32) / 10 = (500 + 160) / 10 = 66
+        assert task.calculate_progress() == 66
 
     def _create_task(
         self,
@@ -175,6 +181,7 @@ class TestAsyncTaskCalculateProgress:
         file_id: str,
         status: FileStatus,
         quality_result: dict | None = None,
+        verification_progress: int = 0,
     ) -> AsyncFile:
         """Helper to create a file with given status."""
         return AsyncFile(
@@ -184,6 +191,7 @@ class TestAsyncTaskCalculateProgress:
             source_s3_key=f"source/{file_id}.mp4",
             status=status,
             quality_result=quality_result,
+            verification_progress=verification_progress,
         )
 
 
@@ -652,3 +660,109 @@ class TestFileStatusDownloaded:
 
         assert restored.status.value == original.status.value
         assert restored.status == FileStatus.DOWNLOADED
+
+
+class TestVerificationProgress:
+    """Test verification_progress field for VERIFYING phase progress tracking.
+
+    Requirements: 2.5, 2.6 - verification_progress field for detailed VERIFYING progress
+    """
+
+    def test_verification_progress_default_value(self):
+        """verification_progress should default to 0."""
+        file = AsyncFile(
+            file_id="file-1",
+            uuid="uuid-1",
+            filename="test.mp4",
+            source_s3_key="source/test.mp4",
+        )
+        assert file.verification_progress == 0
+
+    def test_verification_progress_can_be_set(self):
+        """verification_progress can be set to any value 0-100."""
+        file = AsyncFile(
+            file_id="file-1",
+            uuid="uuid-1",
+            filename="test.mp4",
+            source_s3_key="source/test.mp4",
+            verification_progress=50,
+        )
+        assert file.verification_progress == 50
+
+    def test_to_dict_includes_verification_progress(self):
+        """to_dict should include verification_progress field."""
+        file = AsyncFile(
+            file_id="file-1",
+            uuid="uuid-1",
+            filename="test.mp4",
+            source_s3_key="source/test.mp4",
+            verification_progress=75,
+        )
+        data = file.to_dict()
+        assert "verification_progress" in data
+        assert data["verification_progress"] == 75
+
+    def test_from_dict_restores_verification_progress(self):
+        """from_dict should restore verification_progress."""
+        data = {
+            "file_id": "file-1",
+            "original_uuid": "uuid-1",
+            "filename": "test.mp4",
+            "source_s3_key": "source/test.mp4",
+            "verification_progress": 30,
+        }
+        file = AsyncFile.from_dict(data)
+        assert file.verification_progress == 30
+
+    def test_from_dict_defaults_verification_progress_to_zero(self):
+        """from_dict should default verification_progress to 0 if not present."""
+        data = {
+            "file_id": "file-1",
+            "original_uuid": "uuid-1",
+            "filename": "test.mp4",
+            "source_s3_key": "source/test.mp4",
+        }
+        file = AsyncFile.from_dict(data)
+        assert file.verification_progress == 0
+
+    def test_roundtrip_with_verification_progress(self):
+        """to_dict -> from_dict roundtrip should preserve verification_progress."""
+        original = AsyncFile(
+            file_id="file-1",
+            uuid="uuid-1",
+            filename="test.mp4",
+            source_s3_key="source/test.mp4",
+            status=FileStatus.VERIFYING,
+            verification_progress=100,
+        )
+        data = original.to_dict()
+        restored = AsyncFile.from_dict(data)
+
+        assert restored.verification_progress == original.verification_progress
+        assert restored.verification_progress == 100
+
+    def test_verification_progress_boundary_values(self):
+        """verification_progress should handle boundary values 0 and 100."""
+        # Test 0
+        file_zero = AsyncFile(
+            file_id="file-1",
+            uuid="uuid-1",
+            filename="test.mp4",
+            source_s3_key="source/test.mp4",
+            verification_progress=0,
+        )
+        assert file_zero.verification_progress == 0
+        data_zero = file_zero.to_dict()
+        assert data_zero["verification_progress"] == 0
+
+        # Test 100
+        file_hundred = AsyncFile(
+            file_id="file-2",
+            uuid="uuid-2",
+            filename="test2.mp4",
+            source_s3_key="source/test2.mp4",
+            verification_progress=100,
+        )
+        assert file_hundred.verification_progress == 100
+        data_hundred = file_hundred.to_dict()
+        assert data_hundred["verification_progress"] == 100

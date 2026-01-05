@@ -8,6 +8,11 @@ Validates video conversion quality by checking:
 
 The function downloads videos from S3, performs quality checks,
 and saves results as JSON to S3.
+
+Progress updates (verification_progress):
+- 0: SSIM calculation started
+- 30: Frame extraction complete
+- 100: SSIM calculation complete
 """
 
 import json
@@ -20,6 +25,7 @@ from datetime import datetime
 from typing import Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 # Configure logging
 logger = logging.getLogger()
@@ -28,6 +34,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 # Environment variables
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
 SSIM_THRESHOLD = float(os.environ.get("SSIM_THRESHOLD", "0.95"))
+DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "")
 
 
 @dataclass
@@ -67,6 +74,71 @@ class QualityResult:
 def get_s3_client():
     """Get S3 client."""
     return boto3.client("s3")
+
+
+def get_dynamodb_table():
+    """Get DynamoDB table resource."""
+    if not DYNAMODB_TABLE:
+        return None
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(DYNAMODB_TABLE)
+
+
+def update_verification_progress(task_id: str, file_id: str, progress: int) -> bool:
+    """Update verification progress for a file in DynamoDB.
+
+    Args:
+        task_id: Task ID
+        file_id: File ID within the task
+        progress: Progress value (0-100)
+            - 0: SSIM calculation started
+            - 30: Frame extraction complete
+            - 100: SSIM calculation complete
+
+    Returns:
+        True if update succeeded, False otherwise
+    """
+    table = get_dynamodb_table()
+    if not table:
+        logger.warning("DynamoDB table not configured, skipping progress update")
+        return False
+
+    try:
+        # Get current task to find file index
+        response = table.get_item(Key={"task_id": task_id, "sk": "TASK"})
+        if "Item" not in response:
+            logger.warning(f"Task not found: {task_id}")
+            return False
+
+        task = response["Item"]
+        files = task.get("files", [])
+
+        # Find file index
+        file_index = None
+        for i, f in enumerate(files):
+            if f.get("file_id") == file_id:
+                file_index = i
+                break
+
+        if file_index is None:
+            logger.warning(f"File not found: {file_id} in task {task_id}")
+            return False
+
+        # Update verification_progress for the specific file
+        table.update_item(
+            Key={"task_id": task_id, "sk": "TASK"},
+            UpdateExpression=f"SET files[{file_index}].verification_progress = :progress, updated_at = :updated_at",
+            ExpressionAttributeValues={
+                ":progress": progress,
+                ":updated_at": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+        logger.info(f"Updated verification_progress to {progress} for {task_id}:{file_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to update verification_progress: {e}")
+        return False
 
 
 def download_from_s3(s3_key: str, local_path: str) -> None:
@@ -317,7 +389,12 @@ def embed_metadata(video_path: str, metadata: dict, output_path: str) -> tuple[b
 
 
 def check_quality(
-    original_s3_key: str, converted_s3_key: str, job_id: str, metadata_s3_key: str | None = None
+    original_s3_key: str,
+    converted_s3_key: str,
+    job_id: str,
+    metadata_s3_key: str | None = None,
+    task_id: str | None = None,
+    file_id: str | None = None,
 ) -> QualityResult:
     """Perform comprehensive quality check on converted video.
 
@@ -326,13 +403,25 @@ def check_quality(
     2. Download both videos and metadata
     3. Embed metadata into converted video (if provided)
     4. Verify converted video is playable
-    5. Calculate SSIM score
+    5. Calculate SSIM score (with progress updates)
     6. Extract metadata from converted video
     7. Determine pass/fail status
+
+    Args:
+        original_s3_key: S3 key for original video
+        converted_s3_key: S3 key for converted video
+        job_id: Quality check job ID
+        metadata_s3_key: S3 key for metadata JSON (optional)
+        task_id: Async task ID for progress updates (optional)
+        file_id: File ID within task for progress updates (optional)
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
     metadata_embedded = False
     metadata_embed_error = None
+
+    # Update verification progress: SSIM calculation started (0%)
+    if task_id and file_id:
+        update_verification_progress(task_id, file_id, 0)
 
     # Get file sizes
     original_size = get_file_size_from_s3(original_s3_key)
@@ -377,6 +466,10 @@ def check_quality(
 
         download_from_s3(original_s3_key, original_path)
         download_from_s3(converted_s3_key, converted_path)
+
+        # Update verification progress: Frame extraction complete (30%)
+        if task_id and file_id:
+            update_verification_progress(task_id, file_id, 30)
 
         # Embed metadata if provided
         if video_metadata:
@@ -427,6 +520,10 @@ def check_quality(
 
         # Calculate SSIM
         ssim_score = calculate_ssim(original_path, converted_path)
+
+        # Update verification progress: SSIM calculation complete (100%)
+        if task_id and file_id:
+            update_verification_progress(task_id, file_id, 100)
 
         if ssim_score < SSIM_THRESHOLD:
             return QualityResult(
@@ -503,7 +600,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
         "job_id": "quality_001",
         "original_s3_key": "input/video.mp4",
         "converted_s3_key": "output/video_h265.mp4",
-        "metadata_s3_key": "input/uuid/metadata.json"  // optional
+        "metadata_s3_key": "input/uuid/metadata.json",  // optional
+        "task_id": "async-task-uuid",  // optional, for progress updates
+        "file_id": "file-uuid"  // optional, for progress updates
     }
 
     Returns:
@@ -526,6 +625,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
         original_s3_key = event.get("original_s3_key")
         converted_s3_key = event.get("converted_s3_key")
         metadata_s3_key = event.get("metadata_s3_key")  # Optional
+        task_id = event.get("task_id")  # Optional, for progress updates
+        file_id = event.get("file_id")  # Optional, for progress updates
 
         if not all([job_id, original_s3_key, converted_s3_key]):
             return {
@@ -536,7 +637,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
             }
 
         # Perform quality check
-        result = check_quality(original_s3_key, converted_s3_key, job_id, metadata_s3_key)
+        result = check_quality(
+            original_s3_key, converted_s3_key, job_id, metadata_s3_key, task_id, file_id
+        )
 
         # Save result to S3
         result_key = save_result_to_s3(result)

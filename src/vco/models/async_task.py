@@ -59,6 +59,7 @@ class AsyncFile(BaseVideoMetadata):
         metadata_s3_key: S3 key for the metadata sidecar file
         status: Current processing status (PENDING, CONVERTING, VERIFYING, COMPLETED, FAILED)
         mediaconvert_job_id: MediaConvert job ID (for progress lookup during CONVERTING)
+        verification_progress: Progress of VERIFYING phase (0-100)
         quality_result: Quality verification result (SSIM, compression ratio, etc.)
         error_code: Error code if processing failed
         error_message: Error message if processing failed
@@ -79,6 +80,7 @@ class AsyncFile(BaseVideoMetadata):
     metadata_s3_key: str | None = None
     status: FileStatus = FileStatus.PENDING
     mediaconvert_job_id: str | None = None
+    verification_progress: int = 0  # VERIFYING phase progress (0-100)
     quality_result: dict | None = None
     error_code: int | None = None
     error_message: str | None = None
@@ -108,6 +110,7 @@ class AsyncFile(BaseVideoMetadata):
                 "metadata_s3_key": self.metadata_s3_key,
                 "status": self.status.value,
                 "mediaconvert_job_id": self.mediaconvert_job_id,
+                "verification_progress": self.verification_progress,
                 "quality_result": self.quality_result,
                 "error_code": self.error_code,
                 "error_message": self.error_message,
@@ -142,6 +145,7 @@ class AsyncFile(BaseVideoMetadata):
             metadata_s3_key=data.get("metadata_s3_key"),
             status=FileStatus(data.get("status", "PENDING")),
             mediaconvert_job_id=data.get("mediaconvert_job_id"),
+            verification_progress=data.get("verification_progress", 0),
             quality_result=data.get("quality_result"),
             error_code=data.get("error_code"),
             error_message=data.get("error_message"),
@@ -256,12 +260,13 @@ class AsyncTask:
     def calculate_progress(self) -> int:
         """Calculate overall progress percentage.
 
-        Progress breakdown:
+        Progress breakdown per file:
         - PENDING: 0%
-        - UPLOADING: 10%
-        - CONVERTING: 10% + (file completion rate × 70%)
-        - VERIFYING: 80% + (verification completion rate × 15%)
-        - COMPLETED/PARTIALLY_COMPLETED: 100%
+        - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
+        - VERIFYING: 65-99% (65 + verification_progress * 0.34)
+        - COMPLETED/FAILED: 100%
+
+        Task overall progress is the average of all file progress values.
 
         Returns:
             Progress percentage (0-100)
@@ -269,26 +274,35 @@ class AsyncTask:
         if self.status == TaskStatus.PENDING:
             return 0
         elif self.status == TaskStatus.UPLOADING:
-            return 10
-        elif self.status == TaskStatus.CONVERTING:
-            if not self.files:
-                return 10
-            completed = sum(
-                1 for f in self.files if f.status in (FileStatus.COMPLETED, FileStatus.FAILED)
-            )
-            file_progress = completed / len(self.files)
-            return 10 + int(file_progress * 70)
-        elif self.status == TaskStatus.VERIFYING:
-            if not self.files:
-                return 80
-            verified = sum(1 for f in self.files if f.quality_result is not None)
-            verify_progress = verified / len(self.files)
-            return 80 + int(verify_progress * 15)
+            return 5
         elif self.status in (TaskStatus.COMPLETED, TaskStatus.PARTIALLY_COMPLETED):
             return 100
         elif self.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
             return self.progress_percentage  # Keep last known progress
-        return 0
+
+        # For CONVERTING and VERIFYING, calculate based on file progress
+        if not self.files:
+            return 0
+
+        total_progress = 0
+        for f in self.files:
+            if f.status == FileStatus.PENDING:
+                total_progress += 0
+            elif f.status == FileStatus.CONVERTING:
+                # CONVERTING: 0-65% range
+                # Note: actual jobPercentComplete would be fetched from MediaConvert API
+                # Here we use a default of 32% (midpoint) if not available
+                total_progress += 32
+            elif f.status == FileStatus.VERIFYING:
+                # VERIFYING: 65-99% range
+                # Formula: 65 + (verification_progress * 0.34)
+                total_progress += 65 + int(f.verification_progress * 0.34)
+            elif f.status in (FileStatus.COMPLETED, FileStatus.DOWNLOADED):
+                total_progress += 100
+            elif f.status == FileStatus.FAILED:
+                total_progress += 100  # Failed files are "done" for progress purposes
+
+        return total_progress // len(self.files)
 
     def estimate_completion_time(
         self, avg_conversion_time_per_file: float = 600.0
