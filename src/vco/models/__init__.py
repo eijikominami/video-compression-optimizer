@@ -8,6 +8,14 @@ from vco.models.async_task import (
     TaskStatus,
     aggregate_task_status,
 )
+from vco.models.metadata import (
+    ExtractedMetadata,
+    FieldVerificationResult,
+    GPSLocation,
+    OriginalMetadata,
+    ProcessingTimeProximityWarning,
+    VerificationResult,
+)
 from vco.models.types import (
     BatchImportResult,
     ConversionCandidate,
@@ -29,6 +37,13 @@ __all__ = [
     "FileStatus",
     "TaskStatus",
     "aggregate_task_status",
+    # Metadata verification models
+    "ExtractedMetadata",
+    "FieldVerificationResult",
+    "GPSLocation",
+    "OriginalMetadata",
+    "ProcessingTimeProximityWarning",
+    "VerificationResult",
     # Core types
     "BatchImportResult",
     "ConversionCandidate",

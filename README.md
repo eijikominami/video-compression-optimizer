@@ -133,6 +133,7 @@ vco import --list             # List all importable items (local + AWS)
 vco import --all              # Import all items
 vco import <task-id:file-id>  # Import specific AWS file
 vco import --delete-original <task-id:file-id>  # Import and delete original
+vco import --force <task-id:file-id>  # Import even if metadata verification fails
 ```
 
 ### Import
@@ -159,6 +160,9 @@ vco import -y --all
 # Remove specified ID from queue (also deletes files)
 vco import --remove <item-id>
 
+# Force import even if metadata verification fails
+vco import --force <item-id>
+
 # Clear local review queue only (also deletes files)
 vco import --clear
 ```
@@ -169,12 +173,15 @@ vco import --clear
 
 **Options**:
 - `--delete-original`: Automatically delete original video from Photos after successful import (moves to trash)
+- `--force`: Import even if metadata verification fails (capture date, GPS location mismatch)
 - `-y, --yes`: Skip confirmation prompts
 
 **Note**: 
 - The `--remove` and `--clear` options delete both the queue entry and the corresponding converted video and metadata files.
 - `--clear` only affects local queue; AWS items remain in S3.
 - Without `--delete-original`, you need to manually delete original videos in Photos app after import.
+- Metadata verification checks capture date (±1 second tolerance) and GPS location (±0.0001 degrees tolerance) before import. Use `--force` to bypass verification failures.
+- If capture date is within ±1 hour of processing time, a warning is displayed but import continues.
 
 ### Configuration
 

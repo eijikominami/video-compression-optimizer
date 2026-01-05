@@ -133,6 +133,7 @@ vco import --list             # インポート可能なアイテム一覧（ロ
 vco import --all              # 全アイテムをインポート
 vco import <task-id:file-id>  # 特定の AWS ファイルをインポート
 vco import --delete-original <task-id:file-id>  # インポート後にオリジナルを削除
+vco import --force <task-id:file-id>  # メタデータ検証失敗時も強制インポート
 ```
 
 ### インポート
@@ -159,6 +160,9 @@ vco import -y --all
 # 指定した ID をキューから削除（ファイルも削除）
 vco import --remove <item-id>
 
+# メタデータ検証失敗時も強制インポート
+vco import --force <item-id>
+
 # ローカルレビューキューのみクリア（ファイルも削除）
 vco import --clear
 ```
@@ -169,12 +173,15 @@ vco import --clear
 
 **オプション**:
 - `--delete-original`: インポート成功後にオリジナル動画を Photos から自動削除（ゴミ箱に移動）
+- `--force`: メタデータ検証失敗時（撮影日時、GPS 位置情報の不一致）も強制インポート
 - `-y, --yes`: 確認プロンプトをスキップ
 
 **注意**: 
 - `--remove` と `--clear` オプションは、キューからの削除と同時に対応するファイルも削除します。
 - `--clear` はローカルキューのみに影響し、AWS アイテムは S3 に残ります。
 - `--delete-original` を指定しない場合、インポート後にオリジナル動画を Photos アプリで手動削除する必要があります。
+- メタデータ検証はインポート前に撮影日時（±1 秒許容）と GPS 位置情報（±0.0001 度許容）をチェックします。検証失敗時は `--force` でバイパス可能です。
+- 撮影日時が処理時刻の ±1 時間以内の場合、警告が表示されますがインポートは続行されます。
 
 ### 設定
 

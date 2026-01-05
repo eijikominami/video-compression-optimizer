@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **メタデータ検証機能**
+  - `vco import` 実行時に変換後動画のメタデータを自動検証
+  - 撮影日時の検証（±1 秒許容）
+  - GPS 位置情報の検証（±0.0001 度許容）
+  - 検証失敗時はインポートをスキップ（`--force` でバイパス可能）
+  - 処理時刻近接警告: 撮影日時が処理時刻の ±1 時間以内の場合に警告表示
+  - バッチインポート時の検証サマリー表示
+- **VERIFYING 進捗表示の改善**
+  - `verification_progress` フィールドを AsyncFile に追加（0-100）
+  - Quality Checker Lambda が SSIM 計算の進捗を DynamoDB に更新
+  - 進捗更新タイミング: 0%（開始）→ 30%（フレーム抽出完了）→ 100%（SSIM 計算完了）
+  - CLI の進捗表示が VERIFYING フェーズで 65-99% の範囲で動的に更新
 - **オリジナル動画削除機能**
   - `vco import --delete-original` オプションでインポート後にオリジナル動画を自動削除
   - 削除された動画は Photos のゴミ箱に移動（30 日間復元可能）

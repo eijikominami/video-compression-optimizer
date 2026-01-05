@@ -10,9 +10,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Any
 
 from vco.metadata.manager import VideoMetadata
+from vco.metadata.verifier import MetadataVerifier
+from vco.models.metadata import OriginalMetadata, VerificationResult
 from vco.models.types import (
     DeleteResult,
     ImportableItem,
@@ -37,6 +40,7 @@ class UnifiedImportService:
     - Single item import from AWS
     - Batch import with parallel AWS downloads
     - Queue management (remove, clear)
+    - Metadata verification before import
 
     Requirements: 1.1, 2.1, 3.1, 4.1, 7.1, 7.6
     """
@@ -45,15 +49,18 @@ class UnifiedImportService:
         self,
         aws_service: AwsImportService | None = None,
         swift_bridge: SwiftBridge | None = None,
+        metadata_verifier: MetadataVerifier | None = None,
     ):
         """Initialize UnifiedImportService.
 
         Args:
             aws_service: AwsImportService for AWS imports (optional)
             swift_bridge: SwiftBridge for Photos operations
+            metadata_verifier: MetadataVerifier for metadata verification (optional)
         """
         self.aws_service = aws_service
         self.swift_bridge = swift_bridge or SwiftBridge()
+        self.metadata_verifier = metadata_verifier or MetadataVerifier()
 
     def list_all_importable(self, user_id: str | None = None) -> UnifiedListResult:
         """List all importable items from AWS sources.
@@ -94,6 +101,7 @@ class UnifiedImportService:
         status_callback: Callable[[str, str], None] | None = None,
         delete_original: bool = False,
         original_uuid: str | None = None,
+        force_import: bool = False,
     ) -> UnifiedImportResult:
         """Import a single item from AWS source.
 
@@ -107,6 +115,7 @@ class UnifiedImportService:
             status_callback: Callback for status updates (filename, status)
             delete_original: Whether to delete original video after import
             original_uuid: UUID of original video in Photos library (for deletion)
+            force_import: Whether to import even if metadata verification fails
 
         Returns:
             UnifiedImportResult
@@ -129,6 +138,7 @@ class UnifiedImportService:
             status_callback=status_callback,
             delete_original=delete_original,
             original_uuid=original_uuid,
+            force_import=force_import,
         )
 
     def import_all(
@@ -139,6 +149,7 @@ class UnifiedImportService:
         status_callback: Callable[[str, str], None] | None = None,
         delete_original: bool = False,
         original_uuids: dict[str, str] | None = None,
+        force_import: bool = False,
     ) -> UnifiedBatchResult:
         """Import all items from AWS sources.
 
@@ -151,6 +162,7 @@ class UnifiedImportService:
             status_callback: Callback for status updates (filename, status)
             delete_original: Whether to delete original videos after import
             original_uuids: Mapping of item_id to original video UUID for deletion
+            force_import: Whether to import even if metadata verification fails
 
         Returns:
             UnifiedBatchResult
@@ -173,13 +185,19 @@ class UnifiedImportService:
                 status_callback,
                 delete_original=delete_original,
                 original_uuids=original_uuids,
+                force_import=force_import,
             )
             for import_result in aws_results:
                 result.results.append(import_result)
                 if import_result.success:
                     result.aws_successful += 1
+                    if import_result.metadata_verified:
+                        result.metadata_verified_count += 1
                 else:
                     result.aws_failed += 1
+                    if import_result.metadata_mismatch:
+                        result.metadata_mismatch_count += 1
+                        result.skipped_files.append(import_result.converted_filename)
 
         return result
 
@@ -287,8 +305,9 @@ class UnifiedImportService:
         status_callback: Callable[[str, str], None] | None = None,
         delete_original: bool = False,
         original_uuid: str | None = None,
+        force_import: bool = False,
     ) -> UnifiedImportResult:
-        """Import an AWS item: download, import to Photos, delete S3, optionally delete original."""
+        """Import an AWS item: download, verify metadata, import to Photos, delete S3, optionally delete original."""
         if not self.aws_service:
             return UnifiedImportResult(
                 success=False,
@@ -344,6 +363,82 @@ class UnifiedImportService:
                 checksum_verified=download_result.checksum_verified,
             )
 
+        # Load metadata for verification and album assignment
+        metadata: VideoMetadata | None = None
+        original_metadata: OriginalMetadata | None = None
+        albums: list[str] = []
+        original_filename = ""
+
+        if download_result.metadata_path and download_result.metadata_path.exists():
+            try:
+                import json
+
+                with open(download_result.metadata_path) as f:
+                    metadata_dict = json.load(f)
+                metadata = VideoMetadata.from_dict(metadata_dict)
+                if metadata and metadata.albums:
+                    albums = metadata.albums
+
+                # Create OriginalMetadata for verification
+                original_metadata = OriginalMetadata.from_dict(metadata_dict)
+                original_filename = metadata_dict.get("original_filename", "")
+            except Exception as e:
+                logger.warning(f"Failed to load metadata: {e}")
+
+        # Verify metadata before import
+        verification_result: VerificationResult | None = None
+        metadata_verified = False
+        metadata_mismatch = False
+        verification_skipped = False
+
+        if original_metadata and self.metadata_verifier:
+            try:
+                # Notify status: verifying metadata
+                if status_callback:
+                    status_callback(local_path.name, "verifying")
+
+                verification_result = self.metadata_verifier.verify(
+                    converted_path=local_path,
+                    original_metadata=original_metadata,
+                    processing_time=datetime.now(),
+                )
+
+                if verification_result.has_mismatch:
+                    metadata_mismatch = True
+                    if not force_import:
+                        # Skip import due to metadata mismatch
+                        logger.warning(
+                            f"Metadata mismatch for {local_path.name}: "
+                            f"{verification_result.mismatched_fields}"
+                        )
+                        return UnifiedImportResult(
+                            success=False,
+                            item_id=item_id,
+                            source="aws",
+                            original_filename=original_filename,
+                            converted_filename=local_path.name,
+                            albums=albums,
+                            error_message=f"Metadata mismatch: {', '.join(verification_result.mismatched_fields)}",
+                            downloaded=True,
+                            download_resumed=download_result.download_resumed,
+                            checksum_verified=download_result.checksum_verified,
+                            metadata_verified=False,
+                            metadata_mismatch=True,
+                            verification_result=verification_result,
+                        )
+                else:
+                    metadata_verified = True
+
+                # Log processing time proximity warning if present
+                if verification_result.has_warning and verification_result.processing_time_warning:
+                    logger.warning(verification_result.processing_time_warning.message)
+
+            except Exception as e:
+                logger.warning(f"Metadata verification failed, skipping: {e}")
+                verification_skipped = True
+        else:
+            verification_skipped = True
+
         # Notify status: importing to Photos
         if status_callback:
             status_callback(local_path.name, "importing")
@@ -356,40 +451,40 @@ class UnifiedImportService:
                     success=False,
                     item_id=item_id,
                     source="aws",
-                    original_filename="",
+                    original_filename=original_filename,
                     converted_filename=local_path.name,
                     error_message="Failed to import video to Photos",
                     downloaded=True,
                     download_resumed=download_result.download_resumed,
                     checksum_verified=download_result.checksum_verified,
+                    metadata_verified=metadata_verified,
+                    metadata_mismatch=metadata_mismatch,
+                    verification_result=verification_result,
+                    verification_skipped=verification_skipped,
                 )
 
-            # Load metadata and add to albums if available
-            albums: list[str] = []
-            if download_result.metadata_path and download_result.metadata_path.exists():
+            # Add to albums if available
+            if albums:
                 try:
-                    import json
-
-                    with open(download_result.metadata_path) as f:
-                        metadata_dict = json.load(f)
-                    metadata = VideoMetadata.from_dict(metadata_dict)
-                    if metadata and metadata.albums:
-                        albums = metadata.albums
-                        self.swift_bridge.add_to_albums(new_uuid, albums)
+                    self.swift_bridge.add_to_albums(new_uuid, albums)
                 except Exception as e:
-                    logger.warning(f"Failed to load metadata or add to albums: {e}")
+                    logger.warning(f"Failed to add to albums: {e}")
 
         except PhotosAccessError as e:
             return UnifiedImportResult(
                 success=False,
                 item_id=item_id,
                 source="aws",
-                original_filename="",
+                original_filename=original_filename,
                 converted_filename=local_path.name,
                 error_message=str(e),
                 downloaded=True,
                 download_resumed=download_result.download_resumed,
                 checksum_verified=download_result.checksum_verified,
+                metadata_verified=metadata_verified,
+                metadata_mismatch=metadata_mismatch,
+                verification_result=verification_result,
+                verification_skipped=verification_skipped,
             )
         except Exception as e:
             # Catch any other exceptions during Photos import
@@ -398,12 +493,16 @@ class UnifiedImportService:
                 success=False,
                 item_id=item_id,
                 source="aws",
-                original_filename="",
+                original_filename=original_filename,
                 converted_filename=local_path.name,
                 error_message=str(e),
                 downloaded=True,
                 download_resumed=download_result.download_resumed,
                 checksum_verified=download_result.checksum_verified,
+                metadata_verified=metadata_verified,
+                metadata_mismatch=metadata_mismatch,
+                verification_result=verification_result,
+                verification_skipped=verification_skipped,
             )
 
         # Update file status to DOWNLOADED and delete S3 file via cleanup API
@@ -436,22 +535,8 @@ class UnifiedImportService:
         # Handle original video deletion if requested
         original_deleted = False
         original_delete_error: str | None = None
-        original_filename = ""
 
         if delete_original and original_uuid:
-            # Get original filename from metadata if available
-            if download_result.metadata_path:
-                try:
-                    import json
-
-                    metadata_path = download_result.metadata_path
-                    if metadata_path.exists():
-                        with open(metadata_path) as f:
-                            metadata_dict = json.load(f)
-                        original_filename = metadata_dict.get("original_filename", "")
-                except Exception:
-                    pass
-
             delete_result = self.delete_original_video(original_uuid, original_filename)
             original_deleted = delete_result.success
             if not delete_result.success:
@@ -474,6 +559,10 @@ class UnifiedImportService:
             original_deleted=original_deleted,
             original_delete_error=original_delete_error,
             original_uuid=original_uuid,
+            metadata_verified=metadata_verified,
+            metadata_mismatch=metadata_mismatch,
+            verification_result=verification_result,
+            verification_skipped=verification_skipped,
         )
 
     def _import_aws_items_parallel(
@@ -485,6 +574,7 @@ class UnifiedImportService:
         status_callback: Callable[[str, str], None] | None = None,
         delete_original: bool = False,
         original_uuids: dict[str, str] | None = None,
+        force_import: bool = False,
     ) -> list[UnifiedImportResult]:
         """Import AWS items in parallel with concurrency limit."""
         results: list[UnifiedImportResult] = []
@@ -500,6 +590,7 @@ class UnifiedImportService:
                     status_callback,
                     delete_original,
                     original_uuids.get(item.item_id),
+                    force_import,
                 ): item
                 for item in items
             }

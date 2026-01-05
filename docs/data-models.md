@@ -95,6 +95,7 @@ video = VideoInfo(
 | `metadata_s3_key` | `str \| None` | `None` | メタデータS3キー |
 | `status` | `FileStatus` | `PENDING` | 処理状態 |
 | `mediaconvert_job_id` | `str \| None` | `None` | MediaConvert ジョブID |
+| `verification_progress` | `int` | `0` | VERIFYING フェーズの進捗 (0-100) |
 | `quality_result` | `dict \| None` | `None` | 品質検証結果 |
 | `error_code` | `int \| None` | `None` | エラーコード |
 | `error_message` | `str \| None` | `None` | エラーメッセージ |
@@ -262,7 +263,41 @@ result = async_file_to_conversion_result(async_file, Path("/original.mov"))
 
 | バージョン | 日付 | 変更内容 |
 |-----------|------|---------|
+| 1.1.0 | 2026-01-05 | AsyncFile に verification_progress フィールド追加、進捗計算ロジック改善 |
 | 1.0.0 | 2026-01-01 | 初版作成。BaseVideoMetadata 基底クラス導入、統一されたデータモデル設計 |
+
+## 進捗計算ロジック
+
+### ファイル単位の進捗
+
+各ファイルの状態に応じて進捗率を計算:
+
+| FileStatus | 進捗率 | 説明 |
+|------------|--------|------|
+| `PENDING` | 0% | 処理待ち |
+| `CONVERTING` | 32% | MediaConvert 変換中（0-65% 範囲のデフォルト中間値） |
+| `VERIFYING` | 65-99% | 品質検証中（verification_progress に基づく） |
+| `COMPLETED` | 100% | 完了 |
+| `DOWNLOADED` | 100% | ダウンロード済み |
+| `FAILED` | 100% | 失敗（進捗計算上は完了扱い） |
+
+### VERIFYING 進捗の計算式
+
+```
+overall_progress = 65 + (verification_progress * 0.34)
+```
+
+- `verification_progress = 0` → 65%（SSIM 計算開始）
+- `verification_progress = 30` → 75%（フレーム抽出完了）
+- `verification_progress = 100` → 99%（SSIM 計算完了）
+
+### タスク全体の進捗
+
+全ファイルの進捗率の平均値:
+
+```python
+task_progress = sum(file_progress for file in files) // len(files)
+```
 
 ## 関連ドキュメント
 

@@ -387,6 +387,11 @@ convert.help = get_help("convert.description")
     is_flag=True,
     help="Delete original video from Photos after import",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Import even if metadata verification fails",
+)
 @click.argument("item_id", required=False)
 @click.pass_context
 def import_cmd(
@@ -398,6 +403,7 @@ def import_cmd(
     output_json: bool,
     yes: bool,
     delete_original: bool,
+    force: bool,
     item_id: str | None,
 ):
     """Import converted videos to Photos library."""
@@ -671,6 +677,7 @@ def import_cmd(
             batch_result = unified_service.import_all(
                 progress_callback=download_progress_callback,
                 status_callback=status_callback,
+                force_import=force,
             )
 
         # Show completion message
@@ -686,6 +693,9 @@ def import_cmd(
                         "local_successful": batch_result.local_successful,
                         "aws_total": batch_result.aws_total,
                         "aws_successful": batch_result.aws_successful,
+                        "metadata_verified_count": batch_result.metadata_verified_count,
+                        "metadata_mismatch_count": batch_result.metadata_mismatch_count,
+                        "skipped_files": batch_result.skipped_files,
                         "results": [
                             {
                                 "success": r.success,
@@ -697,6 +707,8 @@ def import_cmd(
                                 "error_message": r.error_message,
                                 "downloaded": r.downloaded,
                                 "s3_deleted": r.s3_deleted,
+                                "metadata_verified": r.metadata_verified,
+                                "metadata_mismatch": r.metadata_mismatch,
                             }
                             for r in batch_result.results
                         ],
@@ -711,6 +723,14 @@ def import_cmd(
         console.print(f"  Total: {batch_result.total}")
         console.print(f"  Successful: [green]{batch_result.successful}[/green]")
         console.print(f"  Failed: [red]{batch_result.failed}[/red]")
+        if batch_result.metadata_verified_count > 0:
+            console.print(
+                f"  Metadata verified: [green]{batch_result.metadata_verified_count}[/green]"
+            )
+        if batch_result.metadata_mismatch_count > 0:
+            console.print(
+                f"  Metadata mismatch: [yellow]{batch_result.metadata_mismatch_count}[/yellow]"
+            )
 
         if batch_result.local_total > 0 or batch_result.aws_total > 0:
             console.print()
@@ -724,11 +744,21 @@ def import_cmd(
                     f"  AWS: {batch_result.aws_successful}/{batch_result.aws_total} successful"
                 )
 
+        # Show skipped files due to metadata mismatch
+        if batch_result.skipped_files:
+            console.print()
+            console.print("[yellow]Skipped (metadata mismatch):[/yellow]")
+            for filename in batch_result.skipped_files[:5]:
+                console.print(f"  - {filename}")
+            if len(batch_result.skipped_files) > 5:
+                console.print(f"  ... and {len(batch_result.skipped_files) - 5} more")
+            console.print("[dim]Use --force to import anyway.[/dim]")
+
         if batch_result.failed > 0:
             console.print()
             console.print("[red]Errors:[/red]")
             for r in batch_result.results:
-                if not r.success:
+                if not r.success and not r.metadata_mismatch:
                     source_label = f"[{r.source}]"
                     console.print(f"  - {source_label} {r.converted_filename}: {r.error_message}")
 
@@ -794,6 +824,7 @@ def import_cmd(
         # Track current filename for status callback
         current_filename = None
         import_task_id = None
+        verify_task_id = None
 
         with Progress(
             SpinnerColumn(),
@@ -815,9 +846,18 @@ def import_cmd(
 
             def status_callback(filename: str, status: str) -> None:
                 """Display status updates for import process."""
-                nonlocal import_task_id, download_task
-                if status == "importing":
-                    # Hide download task and show import spinner
+                nonlocal import_task_id, download_task, verify_task_id
+                if status == "verifying":
+                    # Hide download task and show verify spinner
+                    if download_task is not None:
+                        progress.update(download_task, visible=False)
+                    verify_task_id = progress.add_task(
+                        f"Verifying metadata for {filename}...", total=0, visible=True
+                    )
+                elif status == "importing":
+                    # Hide verify task and show import spinner
+                    if verify_task_id is not None:
+                        progress.update(verify_task_id, visible=False)
                     if download_task is not None:
                         progress.update(download_task, visible=False)
                     import_task_id = progress.add_task(
@@ -830,6 +870,7 @@ def import_cmd(
                 status_callback=status_callback,
                 delete_original=should_delete_original,
                 original_uuid=original_uuid,
+                force_import=force,
             )
 
         # Handle original deletion prompt if import succeeded and --delete-original not specified
@@ -863,6 +904,11 @@ def import_cmd(
                     "error_message": import_result.error_message,
                     "downloaded": import_result.downloaded,
                     "s3_deleted": import_result.s3_deleted,
+                    "metadata_verified": import_result.metadata_verified,
+                    "metadata_mismatch": import_result.metadata_mismatch,
+                    "verification_result": import_result.verification_result.to_dict()
+                    if import_result.verification_result
+                    else None,
                 },
                 indent=2,
             )
@@ -876,6 +922,31 @@ def import_cmd(
                 console.print("[green]✓ Downloaded from S3[/green]")
             if import_result.s3_deleted:
                 console.print("[green]✓ S3 file deleted[/green]")
+
+        # Show metadata verification result
+        if import_result.metadata_verified:
+            console.print("[green]✓ Metadata verified[/green]")
+            vr = import_result.verification_result
+            if vr:
+                # Display verified metadata
+                if vr.capture_date.original_value:
+                    console.print(f"  Capture Date: {vr.capture_date.original_value}")
+                if vr.gps_location.original_value:
+                    console.print(f"  GPS Location: {vr.gps_location.original_value}")
+                if vr.album_info.original_value:
+                    albums_str = (
+                        ", ".join(vr.album_info.original_value)
+                        if vr.album_info.original_value
+                        else "-"
+                    )
+                    console.print(f"  Albums: {albums_str}")
+                # Show processing time proximity warning if present
+                if vr.has_warning and vr.processing_time_warning:
+                    console.print()
+                    console.print(f"[yellow]⚠ {vr.processing_time_warning.message}[/yellow]")
+        elif import_result.verification_skipped:
+            console.print("[dim]Metadata verification skipped[/dim]")
+
         if import_result.albums:
             console.print(f"[green]✓ Added to albums: {', '.join(import_result.albums)}[/green]")
 
@@ -889,7 +960,39 @@ def import_cmd(
                 f"[yellow]⚠ Failed to delete original: {import_result.original_delete_error}[/yellow]"
             )
     else:
-        console.print(f"[red]✗ Import failed: {import_result.error_message}[/red]")
+        # Show metadata mismatch details if applicable
+        if import_result.metadata_mismatch and import_result.verification_result:
+            vr = import_result.verification_result
+            console.print(f"[red]✗ Metadata mismatch: {import_result.converted_filename}[/red]")
+            console.print()
+            console.print("  [bold]Field          Original                    Converted[/bold]")
+            console.print("  " + "─" * 55)
+
+            # Capture date
+            cd = vr.capture_date
+            cd_status = "" if cd.matches else " ← MISMATCH"
+            cd_orig = str(cd.original_value) if cd.original_value else "(none)"
+            cd_conv = str(cd.converted_value) if cd.converted_value else "(missing)"
+            console.print(f"  Capture Date   {cd_orig[:25]:<25} {cd_conv[:15]}{cd_status}")
+
+            # GPS location
+            gps = vr.gps_location
+            gps_status = "" if gps.matches else " ← MISMATCH"
+            gps_orig = str(gps.original_value) if gps.original_value else "(none)"
+            gps_conv = str(gps.converted_value) if gps.converted_value else "(missing)"
+            console.print(f"  GPS Location   {gps_orig[:25]:<25} {gps_conv[:15]}{gps_status}")
+
+            # Albums
+            alb = vr.album_info
+            alb_orig = ", ".join(alb.original_value[:2]) if alb.original_value else "(none)"
+            if alb.original_value and len(alb.original_value) > 2:
+                alb_orig += f" (+{len(alb.original_value) - 2})"
+            console.print(f"  Albums         {alb_orig[:25]:<25} (verified in JSON)")
+
+            console.print()
+            console.print("[yellow]Skipping import. Use --force to import anyway.[/yellow]")
+        else:
+            console.print(f"[red]✗ Import failed: {import_result.error_message}[/red]")
         sys.exit(1)
 
 
