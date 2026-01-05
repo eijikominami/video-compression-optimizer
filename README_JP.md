@@ -132,6 +132,7 @@ vco cancel <task-id>
 vco import --list             # インポート可能なアイテム一覧（ローカル + AWS）
 vco import --all              # 全アイテムをインポート
 vco import <task-id:file-id>  # 特定の AWS ファイルをインポート
+vco import --delete-original <task-id:file-id>  # インポート後にオリジナルを削除
 ```
 
 ### インポート
@@ -145,8 +146,15 @@ vco import --list
 # 指定した動画を Photos にインポート
 vco import <item-id>          # ローカル: review-id, AWS: task-id:file-id
 
+# インポート後にオリジナル動画を自動削除
+vco import --delete-original <item-id>
+
 # 全ての動画を一括インポート（ローカル + AWS）
 vco import --all
+
+# 確認プロンプトをスキップ
+vco import -y <item-id>
+vco import -y --all
 
 # 指定した ID をキューから削除（ファイルも削除）
 vco import --remove <item-id>
@@ -159,11 +167,14 @@ vco import --clear
 - ローカルアイテム: `abc123`（review ID）
 - AWS アイテム: `task-uuid:file-uuid`（task:file 形式）
 
+**オプション**:
+- `--delete-original`: インポート成功後にオリジナル動画を Photos から自動削除（ゴミ箱に移動）
+- `-y, --yes`: 確認プロンプトをスキップ
+
 **注意**: 
 - `--remove` と `--clear` オプションは、キューからの削除と同時に対応するファイルも削除します。
 - `--clear` はローカルキューのみに影響し、AWS アイテムは S3 に残ります。
-
-インポート後、オリジナル動画は Photos アプリで手動削除してください。
+- `--delete-original` を指定しない場合、インポート後にオリジナル動画を Photos アプリで手動削除する必要があります。
 
 ### 設定
 

@@ -407,6 +407,9 @@ class UnifiedImportResult:
         download_resumed: Whether download was resumed from previous progress
         checksum_verified: Whether checksum was verified
         s3_deleted: Whether S3 file was deleted after import
+        original_deleted: Whether original video was deleted from Photos
+        original_delete_error: Error message if original deletion failed
+        original_uuid: UUID of the original video in Photos library
     """
 
     success: bool
@@ -422,6 +425,11 @@ class UnifiedImportResult:
     download_resumed: bool = False
     checksum_verified: bool = False
     s3_deleted: bool = False
+
+    # Original deletion fields
+    original_deleted: bool = False
+    original_delete_error: str | None = None
+    original_uuid: str | None = None
 
 
 @dataclass
@@ -502,6 +510,23 @@ class ClearResult:
     files_deleted: int = 0
     files_failed: int = 0
     error_details: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DeleteResult:
+    """Result of deleting a video from Photos library.
+
+    Attributes:
+        success: Whether the deletion was successful
+        uuid: UUID of the deleted video
+        filename: Filename of the deleted video
+        error_message: Error message if deletion failed
+    """
+
+    success: bool
+    uuid: str
+    filename: str
+    error_message: str | None = None
 
 
 @dataclass
