@@ -91,9 +91,11 @@ Photos ライブラリアクセス用のネイティブ Swift 実装（`bin/vco-
 ### ファイル状態遷移
 
 ```
-PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
-                                 ↘ FAILED     ↘ REMOVED
+PENDING → CONVERTING → COMPLETED → DOWNLOADED
+                    ↘ FAILED     ↘ REMOVED
 ```
+
+注: 品質評価（SSIM/VMAF）は MediaConvert のフレームごとのメトリクスを使用して CONVERTING フェーズ完了時に実行されます。
 
 ## 技術スタック
 
@@ -106,7 +108,7 @@ PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
 | AWS SDK | boto3 |
 | インフラストラクチャ | SAM/CloudFormation |
 | 動画処理 | AWS MediaConvert |
-| 品質チェック | FFmpeg（Lambda Layer）、SSIM |
+| 品質チェック | MediaConvert フレームごとのメトリクス（SSIM、VMAF） |
 
 ## 設計判断
 

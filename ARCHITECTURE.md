@@ -91,9 +91,11 @@ Native Swift implementation for Photos library access (`bin/vco-photos`).
 ### File Status Transitions
 
 ```
-PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
-                                 ↘ FAILED     ↘ REMOVED
+PENDING → CONVERTING → COMPLETED → DOWNLOADED
+                    ↘ FAILED     ↘ REMOVED
 ```
+
+Note: Quality evaluation (SSIM/VMAF) is performed as part of the CONVERTING phase completion using MediaConvert per-frame metrics.
 
 ## Technology Stack
 
@@ -106,7 +108,7 @@ PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
 | AWS SDK | boto3 |
 | Infrastructure | SAM/CloudFormation |
 | Video Processing | AWS MediaConvert |
-| Quality Check | FFmpeg (Lambda Layer), SSIM |
+| Quality Check | MediaConvert Per-Frame Metrics (SSIM, VMAF) |
 
 ## Design Decisions
 
