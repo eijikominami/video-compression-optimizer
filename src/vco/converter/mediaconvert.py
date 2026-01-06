@@ -90,7 +90,10 @@ class MediaConvertClient:
 
         # Create boto3 session
         if profile_name:
-            self.session = boto3.Session(region_name=region, profile_name=profile_name)
+            self.session = boto3.Session(
+                region_name=region,
+                profile_name=profile_name,
+            )
         else:
             self.session = boto3.Session(region_name=region)
 
