@@ -103,7 +103,7 @@
               {
                 "Variable": "$.job_status.status",
                 "StringEquals": "COMPLETE",
-                "Next": "VerifyQuality"
+                "Next": "CheckQualityResult"
               },
               {
                 "Variable": "$.job_status.status",
@@ -155,33 +155,12 @@
             },
             "Next": "FileError"
           },
-          "VerifyQuality": {
-            "Type": "Task",
-            "Resource": "${QualityCheckerFunctionArn}",
-            "Parameters": {
-              "job_id.$": "$.conversion.job_id",
-              "original_s3_key.$": "$.file.source_s3_key",
-              "converted_s3_key.$": "$.job_status.output_s3_key",
-              "metadata_s3_key.$": "$.file.metadata_s3_key",
-              "task_id.$": "$.task_id",
-              "file_id.$": "$.file.file_id"
-            },
-            "ResultPath": "$.quality_result",
-            "Next": "IsQualityOk",
-            "Catch": [
-              {
-                "ErrorEquals": ["States.ALL"],
-                "ResultPath": "$.error",
-                "Next": "PrepareFileErrorFromCatch"
-              }
-            ]
-          },
-          "IsQualityOk": {
+          "CheckQualityResult": {
             "Type": "Choice",
             "Choices": [
               {
-                "Variable": "$.quality_result.body.status",
-                "StringEquals": "passed",
+                "Variable": "$.job_status.quality_passed",
+                "BooleanEquals": true,
                 "Next": "FileSuccess"
               }
             ],
@@ -195,7 +174,7 @@
               "task_id.$": "$.task_id",
               "file.$": "$.file",
               "quality_preset.$": "$.quality_preset",
-              "quality_result.$": "$.quality_result"
+              "quality_result.$": "$.job_status.quality_result"
             },
             "ResultPath": "$.quality_handling",
             "Next": "ShouldRetryWithHigherPreset",
@@ -240,7 +219,7 @@
               "file.$": "$.file",
               "status": "COMPLETED",
               "output_s3_key.$": "$.job_status.output_s3_key",
-              "quality_result.$": "$.quality_result",
+              "quality_result.$": "$.job_status.quality_result",
               "best_effort": true
             },
             "ResultPath": "$.file_result",
@@ -276,7 +255,7 @@
               "file.$": "$.file",
               "status": "COMPLETED",
               "output_s3_key.$": "$.job_status.output_s3_key",
-              "quality_result.$": "$.quality_result"
+              "quality_result.$": "$.job_status.quality_result"
             },
             "ResultPath": "$.file_result",
             "End": true
