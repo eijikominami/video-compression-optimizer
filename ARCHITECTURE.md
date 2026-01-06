@@ -81,7 +81,11 @@ Native Swift implementation for Photos library access (`bin/vco-photos`).
    b. Quality verification (SSIM check)
    c. Status updates to DynamoDB
 7. User checks status with `vco status`
-8. User imports completed files with `vco import` (Swift PhotoKit)
+8. User imports completed files with `vco import`:
+   a. Download converted video from S3
+   b. Embed metadata using exiftool (Keys:CreationDate with timezone)
+   c. Verify metadata matches original
+   d. Import to Photos library (Swift PhotoKit)
 ```
 
 ### File Status Transitions
@@ -98,6 +102,7 @@ PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
 | CLI | Python 3.10+, Click, Rich |
 | Photos Scanning | osxphotos |
 | iCloud Download & Import | Swift PhotoKit |
+| Metadata Embedding | exiftool |
 | AWS SDK | boto3 |
 | Infrastructure | SAM/CloudFormation |
 | Video Processing | AWS MediaConvert |

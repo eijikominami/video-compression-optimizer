@@ -22,6 +22,12 @@ Apple Photos 内の動画を H.265 形式に変換してストレージを節約
 - macOS 10.15 (Catalina) 以降
 - Python 3.10 以降
 - AWS アカウント（MediaConvert、S3、Lambda）
+- exiftool（メタデータ埋め込み用）
+
+```bash
+# exiftool のインストール
+brew install exiftool
+```
 
 ## インストール
 

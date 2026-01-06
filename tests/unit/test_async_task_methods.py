@@ -86,36 +86,19 @@ class TestAsyncTaskCalculateProgress:
         # (100 + 32) / 2 = 66
         assert task.calculate_progress() == 66
 
-    def test_verifying_file_with_zero_progress(self):
-        """VERIFYING file with verification_progress=0 should return 65%."""
-        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=0)]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # 65 + (0 * 0.34) = 65
-        assert task.calculate_progress() == 65
+    def test_converting_with_mixed_progress(self):
+        """CONVERTING with mixed file statuses should average correctly.
 
-    def test_verifying_file_with_thirty_progress(self):
-        """VERIFYING file with verification_progress=30 should return 75%."""
-        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=30)]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # 65 + (30 * 0.34) = 65 + 10.2 = 75
-        assert task.calculate_progress() == 75
-
-    def test_verifying_file_with_hundred_progress(self):
-        """VERIFYING file with verification_progress=100 should return 99%."""
-        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=100)]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # 65 + (100 * 0.34) = 65 + 34 = 99
-        assert task.calculate_progress() == 99
-
-    def test_verifying_with_mixed_progress(self):
-        """VERIFYING with mixed verification_progress should average correctly."""
+        Note: conversion_progress is not tracked per-file in the current implementation.
+        CONVERTING files always return 32% (midpoint of 0-65% range).
+        """
         files = [
-            self._create_file("f1", FileStatus.VERIFYING, verification_progress=0),  # 65%
-            self._create_file("f2", FileStatus.VERIFYING, verification_progress=100),  # 99%
+            self._create_file("f1", FileStatus.CONVERTING),  # 32%
+            self._create_file("f2", FileStatus.CONVERTING),  # 32%
         ]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # (65 + 99) / 2 = 82
-        assert task.calculate_progress() == 82
+        task = self._create_task(TaskStatus.CONVERTING, files)
+        # (32 + 32) / 2 = 32
+        assert task.calculate_progress() == 32
 
     def test_completed_file_returns_hundred(self):
         """COMPLETED file should return 100%."""
@@ -143,11 +126,14 @@ class TestAsyncTaskCalculateProgress:
 
     # Boundary tests
     def test_single_file_progress(self):
-        """Single file progress should be calculated correctly."""
-        files = [self._create_file("f1", FileStatus.VERIFYING, verification_progress=50)]
-        task = self._create_task(TaskStatus.VERIFYING, files)
-        # 65 + (50 * 0.34) = 65 + 17 = 82
-        assert task.calculate_progress() == 82
+        """Single file progress should be calculated correctly.
+
+        Note: CONVERTING files always return 32% (midpoint of 0-65% range).
+        """
+        files = [self._create_file("f1", FileStatus.CONVERTING)]
+        task = self._create_task(TaskStatus.CONVERTING, files)
+        # CONVERTING = 32%
+        assert task.calculate_progress() == 32
 
     def test_many_files_progress(self):
         """Many files progress should average correctly."""

@@ -369,12 +369,12 @@ class SwiftBridge:
         except FileNotFoundError:
             raise PhotosAccessError(f"vco-photos binary not found: {self._binary_path}")
 
-    def import_video(self, video_path: Path, album_name: str | None = None) -> str:
+    def import_video(self, video_path: Path, album_names: list[str] | None = None) -> str:
         """Import a video into Photos library.
 
         Args:
             video_path: Path to the video file to import
-            album_name: Optional album name to add the video to
+            album_names: Optional list of album names to add the video to
 
         Returns:
             UUID of the imported video
@@ -386,8 +386,8 @@ class SwiftBridge:
             raise PhotosAccessError(f"Video file not found: {video_path}")
 
         args: dict[str, Any] = {"path": str(video_path)}
-        if album_name:
-            args["album_names"] = [album_name]
+        if album_names:
+            args["album_names"] = album_names
 
         response = self._execute_command("import", args)
         data = response.get("data", "")

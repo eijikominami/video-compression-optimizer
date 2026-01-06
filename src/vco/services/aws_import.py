@@ -38,6 +38,7 @@ class AwsDownloadResult:
     error_message: str | None = None
     checksum_verified: bool = False
     download_resumed: bool = False
+    original_uuid: str | None = None  # Extracted from metadata JSON for original deletion
 
 
 @dataclass
@@ -247,6 +248,7 @@ class AwsImportService:
 
             # Download metadata file if available
             metadata_path = None
+            original_uuid = None
             metadata_s3_key = getattr(file_detail, "metadata_s3_key", None)
             if metadata_s3_key:
                 try:
@@ -255,8 +257,41 @@ class AwsImportService:
                     self.s3_client.download_file(
                         self.s3_bucket, metadata_s3_key, str(metadata_path)
                     )
+                    # Extract original_uuid from metadata JSON
+                    try:
+                        with open(metadata_path) as meta_file:
+                            metadata_content = json.load(meta_file)
+                            original_uuid = metadata_content.get("original_uuid")
+                            if original_uuid:
+                                logger.info(
+                                    f"Extracted original_uuid from metadata: {original_uuid}"
+                                )
+                    except (json.JSONDecodeError, OSError) as e:
+                        logger.warning(f"Failed to parse metadata JSON for {file_id}: {e}")
                 except Exception as e:
                     logger.warning(f"Failed to download metadata for {file_id}: {e}")
+            else:
+                # Try to find metadata file directly in S3 using expected key pattern
+                try:
+                    metadata_filename = f"{Path(file_detail.filename).stem}_metadata.json"
+                    metadata_path = self.output_dir / metadata_filename
+                    expected_key = f"async/{task_id}/input/{file_id}/metadata.json"
+                    self.s3_client.download_file(self.s3_bucket, expected_key, str(metadata_path))
+                    logger.info(f"Downloaded metadata file from expected key: {expected_key}")
+                    # Extract original_uuid from metadata JSON
+                    try:
+                        with open(metadata_path) as meta_file:
+                            metadata_content = json.load(meta_file)
+                            original_uuid = metadata_content.get("original_uuid")
+                            if original_uuid:
+                                logger.info(
+                                    f"Extracted original_uuid from metadata: {original_uuid}"
+                                )
+                    except (json.JSONDecodeError, OSError) as e:
+                        logger.warning(f"Failed to parse metadata JSON for {file_id}: {e}")
+                except Exception as e:
+                    logger.debug(f"No metadata file found at expected key {expected_key}: {e}")
+                    metadata_path = None
 
             return AwsDownloadResult(
                 success=True,
@@ -266,6 +301,7 @@ class AwsImportService:
                 metadata_path=metadata_path,
                 checksum_verified=download_result.get("checksum_verified", False),
                 download_resumed=download_result.get("resumed", False),
+                original_uuid=original_uuid,
             )
 
         except Exception as e:
@@ -340,6 +376,7 @@ class AwsImportService:
                     start_byte=start_byte,
                     checksum=etag,
                     progress_callback=progress_callback,
+                    display_filename=output_path.name,
                 )
 
             # Verify checksum
@@ -360,6 +397,7 @@ class AwsImportService:
                     start_byte=0,
                     checksum=etag,
                     progress_callback=progress_callback,
+                    display_filename=output_path.name,
                 )
 
                 checksum_ok = self._verify_checksum(temp_path, etag)
@@ -400,6 +438,7 @@ class AwsImportService:
         start_byte: int,
         checksum: str,
         progress_callback: Callable[..., Any] | None = None,
+        display_filename: str | None = None,
     ) -> None:
         """Download file with progress tracking.
 
@@ -412,8 +451,10 @@ class AwsImportService:
             start_byte: Starting byte for resume
             checksum: Expected checksum
             progress_callback: Callback for progress updates
+            display_filename: Filename to display in progress (defaults to local_path.name)
         """
         downloaded = start_byte
+        filename_for_display = display_filename or local_path.name
 
         def callback(bytes_amount: int) -> None:
             nonlocal downloaded
@@ -435,7 +476,7 @@ class AwsImportService:
             # Report progress
             if progress_callback:
                 progress_callback(
-                    local_path.name,
+                    filename_for_display,
                     int((downloaded / total_bytes) * 100),
                     downloaded,
                     total_bytes,

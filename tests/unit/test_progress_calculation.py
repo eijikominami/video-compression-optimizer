@@ -69,8 +69,8 @@ class TestCalculateProgressConverting:
             return 50  # 50% MediaConvert progress
 
         progress, step = calculate_progress(files, get_mediaconvert_progress=mock_get_progress)
-        # 50% * 0.3 = 15%
-        assert progress == 15
+        # 50% * 0.65 = 32%
+        assert progress == 32
         assert step == "converting"
 
     def test_converting_with_callback_full_progress(self):
@@ -81,8 +81,8 @@ class TestCalculateProgressConverting:
             return 100
 
         progress, step = calculate_progress(files, get_mediaconvert_progress=mock_get_progress)
-        # 100% * 0.3 = 30%
-        assert progress == 30
+        # 100% * 0.65 = 65%
+        assert progress == 65
         assert step == "converting"
 
     def test_converting_without_job_id(self):
@@ -174,12 +174,12 @@ class TestProgressConstants:
 
     def test_progress_constants_values(self):
         """Test that progress constants have expected values."""
-        assert PROGRESS_CONVERTING_MIDPOINT == 15
+        assert PROGRESS_CONVERTING_MIDPOINT == 32
         assert PROGRESS_VERIFYING == 65
         assert PROGRESS_COMPLETED == 100
 
     def test_converting_range(self):
-        """Test that CONVERTING progress is in 0-30% range."""
+        """Test that CONVERTING progress is in 0-65% range."""
         # Test with various MediaConvert progress values
         for mc_progress in [0, 25, 50, 75, 100]:
             files = [{"status": "CONVERTING", "mediaconvert_job_id": "job-123"}]
@@ -188,7 +188,7 @@ class TestProgressConstants:
                 return mc_progress
 
             progress, _ = calculate_progress(files, get_mediaconvert_progress=mock_get_progress)
-            assert 0 <= progress <= 30, (
+            assert 0 <= progress <= 65, (
                 f"Progress {progress} out of range for MC progress {mc_progress}"
             )
 

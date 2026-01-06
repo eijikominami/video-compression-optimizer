@@ -18,7 +18,6 @@ class TaskStatus(Enum):
     PENDING = "PENDING"
     UPLOADING = "UPLOADING"
     CONVERTING = "CONVERTING"
-    VERIFYING = "VERIFYING"
     COMPLETED = "COMPLETED"
     PARTIALLY_COMPLETED = "PARTIALLY_COMPLETED"
     FAILED = "FAILED"
@@ -280,7 +279,7 @@ class AsyncTask:
         elif self.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
             return self.progress_percentage  # Keep last known progress
 
-        # For CONVERTING and VERIFYING, calculate based on file progress
+        # For CONVERTING, calculate based on file progress
         if not self.files:
             return 0
 

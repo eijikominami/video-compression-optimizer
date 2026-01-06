@@ -807,3 +807,191 @@ class TestImportAllWithDeleteOriginal:
         assert len(result.results) == 1
         assert result.results[0].original_deleted is True
         swift_bridge.delete_video.assert_called_once_with("original-uuid-789")
+
+
+class TestAwsOriginalUuidExtraction:
+    """Tests for AWS original_uuid extraction from metadata JSON.
+
+    Requirements: 5.2, 5.3 (Property 23, 24)
+    """
+
+    def test_import_uses_original_uuid_from_download_result(self):
+        """Test that import uses original_uuid extracted from metadata JSON when not provided as argument.
+
+        Property 23: AWS original_uuid extraction from metadata
+        """
+        from vco.services.aws_import import CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock()
+
+        # download_and_prepare returns original_uuid extracted from metadata JSON
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id="task123",
+            file_id="file456",
+            local_path=Path("/tmp/video_h265.mp4"),
+            checksum_verified=True,
+            original_uuid="extracted-uuid-from-metadata",  # Extracted from metadata JSON
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        swift_bridge.delete_video.return_value = True
+
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id="file456",
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                "task123:file456",
+                delete_original=True,
+                original_uuid=None,  # Not provided as argument
+            )
+
+        assert result.success is True
+        assert result.original_deleted is True
+        assert result.original_uuid == "extracted-uuid-from-metadata"
+        # delete_video should be called with the extracted UUID
+        swift_bridge.delete_video.assert_called_once_with("extracted-uuid-from-metadata")
+
+    def test_import_prefers_argument_uuid_over_extracted(self):
+        """Test that argument original_uuid takes precedence over extracted UUID."""
+        from vco.services.aws_import import CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock()
+
+        # download_and_prepare returns original_uuid from metadata
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id="task123",
+            file_id="file456",
+            local_path=Path("/tmp/video_h265.mp4"),
+            checksum_verified=True,
+            original_uuid="extracted-uuid-from-metadata",
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        swift_bridge.delete_video.return_value = True
+
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id="file456",
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                "task123:file456",
+                delete_original=True,
+                original_uuid="argument-uuid",  # Provided as argument
+            )
+
+        assert result.success is True
+        assert result.original_deleted is True
+        # Argument UUID should be used (takes precedence)
+        assert result.original_uuid == "argument-uuid"
+        swift_bridge.delete_video.assert_called_once_with("argument-uuid")
+
+    def test_import_with_delete_original_no_uuid_available(self):
+        """Test import with delete_original=True but no UUID available anywhere.
+
+        Property 24: AWS original deletion uses extracted UUID
+        """
+        from vco.services.aws_import import CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock()
+
+        # download_and_prepare returns no original_uuid (metadata didn't have it)
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id="task123",
+            file_id="file456",
+            local_path=Path("/tmp/video_h265.mp4"),
+            checksum_verified=True,
+            original_uuid=None,  # Not available in metadata
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id="file456",
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                "task123:file456",
+                delete_original=True,
+                original_uuid=None,  # Not provided as argument either
+            )
+
+        # Import should still succeed
+        assert result.success is True
+        # But original deletion should fail with error message
+        assert result.original_deleted is False
+        assert result.original_delete_error == "Original video UUID not available in metadata"
+        # delete_video should NOT be called
+        swift_bridge.delete_video.assert_not_called()
+
+    def test_import_without_delete_original_ignores_extracted_uuid(self):
+        """Test that extracted UUID is not used when delete_original=False."""
+        from vco.services.aws_import import CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock()
+
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id="task123",
+            file_id="file456",
+            local_path=Path("/tmp/video_h265.mp4"),
+            checksum_verified=True,
+            original_uuid="extracted-uuid-from-metadata",
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id="file456",
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                "task123:file456",
+                delete_original=False,  # Not requesting deletion
+                original_uuid=None,
+            )
+
+        assert result.success is True
+        assert result.original_deleted is False
+        assert result.original_delete_error is None
+        # delete_video should NOT be called
+        swift_bridge.delete_video.assert_not_called()

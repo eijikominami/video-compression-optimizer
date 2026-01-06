@@ -410,6 +410,8 @@ class UnifiedImportResult:
         original_deleted: Whether original video was deleted from Photos
         original_delete_error: Error message if original deletion failed
         original_uuid: UUID of the original video in Photos library
+        metadata_embedded: Whether metadata was embedded using exiftool
+        embed_result: Detailed embedding result
         metadata_verified: Whether metadata verification passed
         metadata_mismatch: Whether metadata verification found mismatches
         verification_result: Detailed verification result
@@ -434,6 +436,10 @@ class UnifiedImportResult:
     original_deleted: bool = False
     original_delete_error: str | None = None
     original_uuid: str | None = None
+
+    # Metadata embedding fields
+    metadata_embedded: bool = False
+    embed_result: Any = None  # EmbedResult
 
     # Metadata verification fields
     metadata_verified: bool = False

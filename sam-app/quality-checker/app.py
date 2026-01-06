@@ -18,14 +18,15 @@ Progress updates (verification_progress):
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Configure logging
 logger = logging.getLogger()
@@ -66,8 +67,6 @@ class QualityResult:
     playback_verified: bool
     failure_reason: str | None
     converted_metadata: dict | None
-    metadata_embedded: bool
-    metadata_embed_error: str | None
     timestamp: str
 
 
@@ -250,7 +249,7 @@ def verify_playback(video_path: str) -> bool:
         return False
 
 
-def calculate_ssim(original_path: str, converted_path: str) -> float:
+def calculate_ssim(original_path: str, converted_path: str, task_id: str = None, file_id: str = None) -> float:
     """Calculate SSIM score between original and converted video.
 
     Uses FFmpeg's ssim filter to compare videos frame by frame.
@@ -258,6 +257,12 @@ def calculate_ssim(original_path: str, converted_path: str) -> float:
 
     Note: FFmpeg ssim filter expects the reference (original) as the second input.
     The first input is the distorted/converted video, second is the reference.
+    
+    Args:
+        original_path: Path to original video file
+        converted_path: Path to converted video file
+        task_id: Task ID for progress updates (optional)
+        file_id: File ID for progress updates (optional)
     """
     cmd = [
         "ffmpeg",
@@ -272,23 +277,154 @@ def calculate_ssim(original_path: str, converted_path: str) -> float:
         "-",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    # Get total frames for progress calculation
+    total_frames = None
+    if task_id and file_id:
+        try:
+            total_frames = get_total_frames(original_path)
+        except Exception as e:
+            logger.warning(f"Failed to get total frames: {e}")
+
+    # Start FFmpeg process
+    process = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True)
+    
+    # Progress tracking
+    last_update_time = 0
+    last_progress = 30
+    stderr_lines = []
+    
+    try:
+        # Read FFmpeg output line by line
+        for line in iter(process.stderr.readline, ''):
+            stderr_lines.append(line)
+            
+            # Update progress if task_id and file_id provided
+            if task_id and file_id and total_frames and line.startswith("n:"):
+                try:
+                    import time
+                    import re
+                    
+                    # Extract current frame number from SSIM output (n:12345 format)
+                    match = re.search(r'n:(\d+)', line)
+                    if match:
+                        current_frame = int(match.group(1))
+                        
+                        # Calculate progress (30% to 99%)
+                        progress = 30 + int((current_frame / total_frames) * 69)
+                        progress = min(progress, 99)  # Cap at 99%
+                        
+                        # Update every 30 seconds or 5% progress change
+                        now = time.time()
+                        if (now - last_update_time >= 30) or (progress - last_progress >= 5):
+                            update_verification_progress(task_id, file_id, progress)
+                            last_update_time = now
+                            last_progress = progress
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to update progress: {e}")
+        
+        # Wait for process completion
+        return_code = process.wait(timeout=1800)
+        
+        if return_code != 0:
+            stderr_output = ''.join(stderr_lines)
+            raise RuntimeError(f"FFmpeg failed with return code {return_code}: {stderr_output}")
+            
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise RuntimeError("FFmpeg SSIM calculation timed out after 30 minutes")
 
     # Parse SSIM output - look for "All:" line which contains average SSIM
     # Format: "SSIM Y:0.987654 (19.123456) U:0.987654 (19.123456) V:0.987654 (19.123456) All:0.987654 (19.123456)"
     ssim_score = 0.0
+    stderr_output = ''.join(stderr_lines)
 
-    for line in result.stderr.split("\n"):
+    for line in stderr_output.split("\n"):
         if "All:" in line:
             # Extract the All: value
             try:
                 all_part = line.split("All:")[1].strip()
                 ssim_str = all_part.split()[0]
                 ssim_score = float(ssim_str)
+                break
             except (IndexError, ValueError) as e:
                 logger.warning(f"Failed to parse SSIM from line: {line}, error: {e}")
 
     return ssim_score
+
+
+def get_total_frames(video_path: str) -> int:
+    """Get total frame count of a video file from metadata.
+    
+    Estimates frame count from duration and fps (fast).
+    
+    Args:
+        video_path: Path to video file
+        
+    Returns:
+        Estimated total number of frames
+    """
+    cmd = [
+        "ffprobe",
+        "-v", "quiet",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=duration,r_frame_rate",
+        "-of", "csv=p=0",
+        video_path
+    ]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    
+    if result.returncode == 0:
+        try:
+            lines = result.stdout.strip().split('\n')
+            # Format: "fps,duration" or "fps\nduration"
+            parts = result.stdout.strip().replace('\n', ',').split(',')
+            
+            fps_str = None
+            duration = None
+            
+            for part in parts:
+                part = part.strip()
+                if '/' in part:
+                    # This is fps (e.g., "30000/1001")
+                    num, den = part.split('/')
+                    fps_str = float(num) / float(den)
+                elif part and not fps_str:
+                    # Try as fps first
+                    try:
+                        fps_str = float(part)
+                    except ValueError:
+                        pass
+                elif part:
+                    # This is duration
+                    try:
+                        duration = float(part)
+                    except ValueError:
+                        pass
+            
+            if fps_str and duration:
+                return int(duration * fps_str)
+        except (ValueError, ZeroDivisionError) as e:
+            logger.warning(f"Failed to parse video metadata: {e}")
+    
+    # Fallback: use format duration
+    cmd_format = [
+        "ffprobe",
+        "-v", "quiet",
+        "-show_entries", "format=duration",
+        "-of", "csv=p=0",
+        video_path
+    ]
+    result = subprocess.run(cmd_format, capture_output=True, text=True, timeout=10)
+    if result.returncode == 0:
+        try:
+            duration = float(result.stdout.strip())
+            return int(duration * 30)  # Assume 30fps
+        except ValueError:
+            pass
+    
+    return 10000  # Final fallback
 
 
 def get_metadata_from_s3(metadata_s3_key: str) -> dict | None:
@@ -313,81 +449,6 @@ def get_metadata_from_s3(metadata_s3_key: str) -> dict | None:
         return None
 
 
-def embed_metadata(video_path: str, metadata: dict, output_path: str) -> tuple[bool, str | None]:
-    """Embed metadata into video file using FFmpeg.
-
-    Embeds:
-    - creation_time: capture date/time
-    - location: GPS coordinates (if available)
-
-    Args:
-        video_path: Path to input video
-        metadata: Metadata dict with capture_date, location, etc.
-        output_path: Path for output video with embedded metadata
-
-    Returns:
-        Tuple of (success, error_message)
-    """
-    try:
-        # Build FFmpeg metadata arguments
-        metadata_args = []
-
-        # Add creation_time from capture_date
-        capture_date = metadata.get("capture_date")
-        if capture_date:
-            # FFmpeg expects format: YYYY-MM-DDTHH:MM:SS.000000Z
-            metadata_args.extend(["-metadata", f"creation_time={capture_date}"])
-
-        # Add location if available
-        location = metadata.get("location")
-        if location and len(location) == 2:
-            lat, lon = location
-            # FFmpeg location format: +/-DD.DDDD+/-DDD.DDDD/
-            lat_sign = "+" if lat >= 0 else ""
-            lon_sign = "+" if lon >= 0 else ""
-            location_str = f"{lat_sign}{lat:.4f}{lon_sign}{lon:.4f}/"
-            metadata_args.extend(["-metadata", f"location={location_str}"])
-
-        if not metadata_args:
-            logger.info("No metadata to embed")
-            return False, "No metadata to embed"
-
-        # Build FFmpeg command
-        cmd = (
-            [
-                "ffmpeg",
-                "-i",
-                video_path,
-                "-c",
-                "copy",  # Copy streams without re-encoding
-                "-map_metadata",
-                "0",  # Copy existing metadata
-            ]
-            + metadata_args
-            + [
-                "-y",  # Overwrite output
-                output_path,
-            ]
-        )
-
-        logger.info(f"Embedding metadata with command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-        if result.returncode != 0:
-            error_msg = f"FFmpeg failed: {result.stderr}"
-            logger.error(error_msg)
-            return False, error_msg
-
-        return True, None
-
-    except subprocess.TimeoutExpired:
-        return False, "Metadata embedding timed out"
-    except Exception as e:
-        error_msg = f"Metadata embedding failed: {str(e)}"
-        logger.exception(error_msg)
-        return False, error_msg
-
-
 def check_quality(
     original_s3_key: str,
     converted_s3_key: str,
@@ -400,24 +461,24 @@ def check_quality(
 
     Steps:
     1. Get file sizes from S3
-    2. Download both videos and metadata
-    3. Embed metadata into converted video (if provided)
-    4. Verify converted video is playable
-    5. Calculate SSIM score (with progress updates)
-    6. Extract metadata from converted video
-    7. Determine pass/fail status
+    2. Download both videos
+    3. Verify converted video is playable
+    4. Calculate SSIM score (with progress updates)
+    5. Extract metadata from converted video
+    6. Determine pass/fail status
+
+    Note: Metadata embedding is now done by CLI using exiftool for correct
+    timezone handling in Photos app.
 
     Args:
         original_s3_key: S3 key for original video
         converted_s3_key: S3 key for converted video
         job_id: Quality check job ID
-        metadata_s3_key: S3 key for metadata JSON (optional)
+        metadata_s3_key: S3 key for metadata JSON (kept for CLI to retrieve)
         task_id: Async task ID for progress updates (optional)
         file_id: File ID within task for progress updates (optional)
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
-    metadata_embedded = False
-    metadata_embed_error = None
 
     # Update verification progress: SSIM calculation started (0%)
     if task_id and file_id:
@@ -448,16 +509,8 @@ def check_quality(
             playback_verified=False,
             failure_reason="Converted file is not smaller than original",
             converted_metadata=None,
-            metadata_embedded=False,
-            metadata_embed_error=None,
             timestamp=timestamp,
         )
-
-    # Get metadata from S3 if provided
-    video_metadata = None
-    if metadata_s3_key:
-        video_metadata = get_metadata_from_s3(metadata_s3_key)
-        logger.info(f"Retrieved metadata: {video_metadata}")
 
     # Download files for detailed analysis
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -470,31 +523,6 @@ def check_quality(
         # Update verification progress: Frame extraction complete (30%)
         if task_id and file_id:
             update_verification_progress(task_id, file_id, 30)
-
-        # Embed metadata if provided
-        if video_metadata:
-            embedded_path = os.path.join(tmpdir, "converted_with_metadata.mp4")
-            success, error = embed_metadata(converted_path, video_metadata, embedded_path)
-
-            if success:
-                # Replace converted file with metadata-embedded version
-                os.replace(embedded_path, converted_path)
-                metadata_embedded = True
-                logger.info("Metadata embedded successfully")
-
-                # Upload the metadata-embedded file back to S3
-                upload_to_s3(converted_path, converted_s3_key)
-
-                # Update converted size after metadata embedding
-                converted_size = os.path.getsize(converted_path)
-                compression_ratio = original_size / converted_size if converted_size > 0 else 0.0
-                space_saved_bytes = original_size - converted_size
-                space_saved_percent = (
-                    (space_saved_bytes / original_size * 100) if original_size > 0 else 0.0
-                )
-            else:
-                metadata_embed_error = error
-                logger.warning(f"Metadata embedding failed: {error}")
 
         # Verify playback
         playback_ok = verify_playback(converted_path)
@@ -513,13 +541,11 @@ def check_quality(
                 playback_verified=False,
                 failure_reason="Converted video is not playable",
                 converted_metadata=None,
-                metadata_embedded=metadata_embedded,
-                metadata_embed_error=metadata_embed_error,
                 timestamp=timestamp,
             )
 
-        # Calculate SSIM
-        ssim_score = calculate_ssim(original_path, converted_path)
+        # Calculate SSIM with progress updates
+        ssim_score = calculate_ssim(original_path, converted_path, task_id, file_id)
 
         # Update verification progress: SSIM calculation complete (100%)
         if task_id and file_id:
@@ -540,8 +566,6 @@ def check_quality(
                 playback_verified=True,
                 failure_reason=f"SSIM score {ssim_score:.4f} is below threshold {SSIM_THRESHOLD}",
                 converted_metadata=None,
-                metadata_embedded=metadata_embedded,
-                metadata_embed_error=metadata_embed_error,
                 timestamp=timestamp,
             )
 
@@ -570,8 +594,6 @@ def check_quality(
             playback_verified=True,
             failure_reason=None,
             converted_metadata=converted_metadata,
-            metadata_embedded=metadata_embedded,
-            metadata_embed_error=metadata_embed_error,
             timestamp=timestamp,
         )
 

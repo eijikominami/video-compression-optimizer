@@ -314,16 +314,17 @@ class OriginalMetadata:
                 )
 
         capture_date = None
-        if data.get("capture_date"):
-            if isinstance(data["capture_date"], datetime):
-                capture_date = data["capture_date"]
+        capture_date_field = data.get("capture_date") or data.get("creation_date")
+        if capture_date_field:
+            if isinstance(capture_date_field, datetime):
+                capture_date = capture_date_field
             else:
-                capture_date = datetime.fromisoformat(data["capture_date"])
+                capture_date = datetime.fromisoformat(capture_date_field)
 
         return cls(
             capture_date=capture_date,
             gps_location=gps_location,
             album_names=data.get("album_names", data.get("albums", [])),
             original_uuid=data.get("original_uuid", data.get("uuid", "")),
-            filename=data.get("filename", ""),
+            filename=data.get("filename", data.get("original_filename", "")),
         )

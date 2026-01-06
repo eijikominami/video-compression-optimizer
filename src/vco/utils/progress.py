@@ -13,9 +13,9 @@ from typing import Any
 
 # Progress mapping constants
 PROGRESS_PENDING = 0
-PROGRESS_CONVERTING_MIDPOINT = 15  # Midpoint of 0-30% range
-PROGRESS_CONVERTING_MAX = 30
-PROGRESS_VERIFYING = 65
+PROGRESS_CONVERTING_MIDPOINT = 32  # Midpoint of 0-65% range
+PROGRESS_CONVERTING_MAX = 65
+PROGRESS_VERIFYING = 65  # Base progress for VERIFYING status
 PROGRESS_COMPLETED = 100
 
 
@@ -29,8 +29,8 @@ def calculate_progress(
 
     File status to progress mapping:
     - PENDING: 0%
-    - CONVERTING: 0-30% (scaled from MediaConvert jobPercentComplete)
-    - VERIFYING: 65% (fixed, SSIM calculation has no progress API)
+    - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
+    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
     - COMPLETED/FAILED: 100%
 
     Task progress is the average of all file progress percentages.
@@ -38,7 +38,7 @@ def calculate_progress(
     Args:
         files: List of file dictionaries with 'status' and optionally 'mediaconvert_job_id'
         get_mediaconvert_progress: Optional callback to get MediaConvert job progress.
-            If None, uses midpoint value (15%) for CONVERTING status.
+            If None, uses midpoint value (32%) for CONVERTING status.
 
     Returns:
         Tuple of (progress_percentage, current_step)
@@ -58,21 +58,22 @@ def calculate_progress(
             # 0%
             pass
         elif status == "CONVERTING":
-            # 0-30% range
+            # 0-65% range
             if get_mediaconvert_progress:
                 job_id = f.get("mediaconvert_job_id")
                 if job_id:
                     mc_progress = get_mediaconvert_progress(job_id)
-                    # Scale 0-100% to 0-30%
-                    total_progress += int(mc_progress * 0.3)
+                    # Scale 0-100% to 0-65%
+                    total_progress += int(mc_progress * 0.65)
                 # else: 0%
             else:
                 # Use midpoint when no callback provided
                 total_progress += PROGRESS_CONVERTING_MIDPOINT
             current_step = "converting"
         elif status == "VERIFYING":
-            # 65% fixed (SSIM calculation has no progress API)
-            total_progress += PROGRESS_VERIFYING
+            # 65-99% range: 65 + (verification_progress * 0.34)
+            verification_progress = f.get("verification_progress", 0)
+            total_progress += PROGRESS_VERIFYING + int(verification_progress * 0.34)
             current_step = "verifying"
         elif status in ("COMPLETED", "FAILED"):
             # 100%
@@ -97,8 +98,8 @@ def calculate_progress_simple(files: list[dict[str, Any]]) -> tuple[int, str]:
 
     File status to progress mapping:
     - PENDING: 0%
-    - CONVERTING: 15% (midpoint of 0-30% range)
-    - VERIFYING: 65% (fixed)
+    - CONVERTING: 32% (midpoint of 0-65% range)
+    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
     - COMPLETED/FAILED: 100%
 
     Args:

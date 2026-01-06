@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **メタデータ埋め込みを Lambda から CLI に移行**
+  - Lambda (quality-checker) でのメタデータ埋め込みを廃止
+  - CLI で exiftool を使用して `Keys:CreationDate` タグに書き込み
+  - Photos アプリでタイムゾーンが正しく表示されるように修正（9 時間ズレ問題の解決）
+  - 新しい依存関係: exiftool (`brew install exiftool`)
+
+### Fixed
+
+- **`vco import --all` モードでオリジナル動画削除プロンプトが表示されない問題を修正**
+  - `--all` モードでインポート成功後に "Delete N original video(s)?" プロンプトが表示されるように修正
+  - `--delete-original` フラグ指定時はプロンプトなしで削除実行
+  - `-y` フラグのみ指定時はプロンプトなし、削除なし、リマインダー表示
+- **API レスポンスに `metadata_s3_key` フィールドが含まれない問題を修正**
+  - `async-task-status` Lambda 関数のレスポンスに `metadata_s3_key` を追加
+  - クライアント側でフォールバック S3 パス取得を実装（API が返さない場合の互換性対応）
+
 ### Added
 
 - **メタデータ検証機能**
@@ -98,6 +116,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ローカル変換関連コード**
   - `ReviewService`, `ImportService` を削除（AWS 専用に移行）
+
+### Fixed
+
+- **AWS アイテムのオリジナル動画削除が機能しない問題を修正**
+  - `vco import --delete-original` で AWS アイテムのオリジナル動画が削除されない問題を修正
+  - メタデータ JSON から `original_uuid` を抽出し、削除処理に使用するように変更
+  - 引数で `original_uuid` が指定されていない場合、ダウンロード結果から自動取得
+  - `_upload_metadata()` に `original_uuid` と `original_filename` フィールドを追加（S3 メタデータ JSON に含まれるように修正）
   - `review.py`, `import_service.py` を削除
   - 関連するテストファイルを削除
 - **`--legacy` オプション**

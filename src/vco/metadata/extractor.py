@@ -108,9 +108,10 @@ class MetadataExtractor:
     def _parse_creation_time(self, ffprobe_output: dict, errors: list[str]) -> datetime | None:
         """Parse creation_time from ffprobe output.
 
-        Looks for creation_time in:
-        1. format.tags.creation_time
-        2. streams[0].tags.creation_time (video stream)
+        Looks for creation_time in priority order:
+        1. format.tags.com.apple.quicktime.creationdate (Keys:CreationDate with timezone)
+        2. format.tags.creation_time
+        3. streams[0].tags.creation_time (video stream)
 
         Args:
             ffprobe_output: Parsed ffprobe JSON output
@@ -120,10 +121,14 @@ class MetadataExtractor:
             Parsed datetime or None
         """
         creation_time_str = None
-
-        # Try format.tags.creation_time first
         format_tags = ffprobe_output.get("format", {}).get("tags", {})
-        creation_time_str = format_tags.get("creation_time")
+
+        # Try com.apple.quicktime.creationdate first (Keys:CreationDate with timezone)
+        creation_time_str = format_tags.get("com.apple.quicktime.creationdate")
+
+        # Fall back to creation_time
+        if not creation_time_str:
+            creation_time_str = format_tags.get("creation_time")
 
         # Fall back to video stream tags
         if not creation_time_str:
@@ -140,12 +145,20 @@ class MetadataExtractor:
 
         try:
             # Handle various datetime formats
-            # Common formats: "2024-01-15T14:30:00.000000Z", "2024-01-15 14:30:00"
+            # Common formats:
+            # - "2024-01-15T14:30:00.000000Z" (UTC)
+            # - "2024-01-15 14:30:00"
+            # - "2021-11-27T09:40:30+0900" (com.apple.quicktime.creationdate format)
             creation_time_str = creation_time_str.replace("Z", "+00:00")
+
+            # Handle +0900 format (no colon) -> +09:00
+            if "+" in creation_time_str and ":" not in creation_time_str.split("+")[-1]:
+                # Find the timezone part and add colon
+                parts = creation_time_str.rsplit("+", 1)
+                if len(parts) == 2 and len(parts[1]) == 4:
+                    creation_time_str = f"{parts[0]}+{parts[1][:2]}:{parts[1][2:]}"
+
             if "T" in creation_time_str:
-                # ISO format with potential timezone
-                if "+" in creation_time_str or creation_time_str.endswith("Z"):
-                    return datetime.fromisoformat(creation_time_str.replace("Z", "+00:00"))
                 return datetime.fromisoformat(creation_time_str)
             else:
                 # Simple format without T

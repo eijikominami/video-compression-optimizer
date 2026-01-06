@@ -22,6 +22,12 @@ A tool to convert videos in Apple Photos to H.265 format to save storage space.
 - macOS 10.15 (Catalina) or later
 - Python 3.10 or later
 - AWS account (MediaConvert, S3, Lambda)
+- exiftool (for metadata embedding)
+
+```bash
+# Install exiftool
+brew install exiftool
+```
 
 ## Installation
 

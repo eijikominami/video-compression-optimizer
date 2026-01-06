@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
+from vco.metadata.embedder import EmbedResult, MetadataEmbedder
 from vco.metadata.manager import VideoMetadata
 from vco.metadata.verifier import MetadataVerifier
 from vco.models.metadata import OriginalMetadata, VerificationResult
@@ -49,6 +50,7 @@ class UnifiedImportService:
         self,
         aws_service: AwsImportService | None = None,
         swift_bridge: SwiftBridge | None = None,
+        metadata_embedder: MetadataEmbedder | None = None,
         metadata_verifier: MetadataVerifier | None = None,
     ):
         """Initialize UnifiedImportService.
@@ -56,10 +58,12 @@ class UnifiedImportService:
         Args:
             aws_service: AwsImportService for AWS imports (optional)
             swift_bridge: SwiftBridge for Photos operations
+            metadata_embedder: MetadataEmbedder for embedding metadata (optional)
             metadata_verifier: MetadataVerifier for metadata verification (optional)
         """
         self.aws_service = aws_service
         self.swift_bridge = swift_bridge or SwiftBridge()
+        self.metadata_embedder = metadata_embedder or MetadataEmbedder()
         self.metadata_verifier = metadata_verifier or MetadataVerifier()
 
     def list_all_importable(self, user_id: str | None = None) -> UnifiedListResult:
@@ -98,7 +102,7 @@ class UnifiedImportService:
         item_id: str,
         user_id: str | None = None,
         progress_callback: Callable[..., Any] | None = None,
-        status_callback: Callable[[str, str], None] | None = None,
+        status_callback: Callable[..., None] | None = None,
         delete_original: bool = False,
         original_uuid: str | None = None,
         force_import: bool = False,
@@ -146,7 +150,7 @@ class UnifiedImportService:
         user_id: str | None = None,
         max_concurrent_downloads: int = 3,
         progress_callback: Callable[..., Any] | None = None,
-        status_callback: Callable[[str, str], None] | None = None,
+        status_callback: Callable[..., None] | None = None,
         delete_original: bool = False,
         original_uuids: dict[str, str] | None = None,
         force_import: bool = False,
@@ -302,7 +306,7 @@ class UnifiedImportService:
         item_id: str,
         user_id: str | None,
         progress_callback: Callable[..., Any] | None,
-        status_callback: Callable[[str, str], None] | None = None,
+        status_callback: Callable[..., None] | None = None,
         delete_original: bool = False,
         original_uuid: str | None = None,
         force_import: bool = False,
@@ -385,6 +389,35 @@ class UnifiedImportService:
             except Exception as e:
                 logger.warning(f"Failed to load metadata: {e}")
 
+        # Embed metadata using exiftool (Keys:CreationDate for correct timezone in Photos)
+        embed_result: EmbedResult | None = None
+        metadata_embedded = False
+
+        if original_metadata and self.metadata_embedder:
+            try:
+                # Notify status: embedding metadata
+                if status_callback:
+                    status_callback(local_path.name, "embedding", None, None)
+
+                embed_result = self.metadata_embedder.embed(
+                    video_path=local_path,
+                    metadata=original_metadata,
+                )
+
+                if embed_result.success and not embed_result.skipped:
+                    metadata_embedded = True
+                    logger.info(
+                        f"Metadata embedded: {embed_result.embedded_fields} for {local_path.name}"
+                    )
+                elif embed_result.skipped:
+                    logger.info(f"Metadata embedding skipped for {local_path.name}")
+                else:
+                    logger.warning(
+                        f"Metadata embedding failed for {local_path.name}: {embed_result.error_message}"
+                    )
+            except Exception as e:
+                logger.warning(f"Metadata embedding failed: {e}")
+
         # Verify metadata before import
         verification_result: VerificationResult | None = None
         metadata_verified = False
@@ -395,7 +428,7 @@ class UnifiedImportService:
             try:
                 # Notify status: verifying metadata
                 if status_callback:
-                    status_callback(local_path.name, "verifying")
+                    status_callback(local_path.name, "verifying", None, None)
 
                 verification_result = self.metadata_verifier.verify(
                     converted_path=local_path,
@@ -422,6 +455,8 @@ class UnifiedImportService:
                             downloaded=True,
                             download_resumed=download_result.download_resumed,
                             checksum_verified=download_result.checksum_verified,
+                            metadata_embedded=metadata_embedded,
+                            embed_result=embed_result,
                             metadata_verified=False,
                             metadata_mismatch=True,
                             verification_result=verification_result,
@@ -441,11 +476,14 @@ class UnifiedImportService:
 
         # Notify status: importing to Photos
         if status_callback:
-            status_callback(local_path.name, "importing")
+            status_callback(local_path.name, "importing", None, None)
 
-        # Import to Photos
+        # Import to Photos (with albums if available)
         try:
-            new_uuid = self.swift_bridge.import_video(video_path=local_path)
+            new_uuid = self.swift_bridge.import_video(
+                video_path=local_path,
+                album_names=albums if albums else None,
+            )
             if not new_uuid:
                 return UnifiedImportResult(
                     success=False,
@@ -457,18 +495,13 @@ class UnifiedImportService:
                     downloaded=True,
                     download_resumed=download_result.download_resumed,
                     checksum_verified=download_result.checksum_verified,
+                    metadata_embedded=metadata_embedded,
+                    embed_result=embed_result,
                     metadata_verified=metadata_verified,
                     metadata_mismatch=metadata_mismatch,
                     verification_result=verification_result,
                     verification_skipped=verification_skipped,
                 )
-
-            # Add to albums if available
-            if albums:
-                try:
-                    self.swift_bridge.add_to_albums(new_uuid, albums)
-                except Exception as e:
-                    logger.warning(f"Failed to add to albums: {e}")
 
         except PhotosAccessError as e:
             return UnifiedImportResult(
@@ -481,6 +514,8 @@ class UnifiedImportService:
                 downloaded=True,
                 download_resumed=download_result.download_resumed,
                 checksum_verified=download_result.checksum_verified,
+                metadata_embedded=metadata_embedded,
+                embed_result=embed_result,
                 metadata_verified=metadata_verified,
                 metadata_mismatch=metadata_mismatch,
                 verification_result=verification_result,
@@ -499,6 +534,8 @@ class UnifiedImportService:
                 downloaded=True,
                 download_resumed=download_result.download_resumed,
                 checksum_verified=download_result.checksum_verified,
+                metadata_embedded=metadata_embedded,
+                embed_result=embed_result,
                 metadata_verified=metadata_verified,
                 metadata_mismatch=metadata_mismatch,
                 verification_result=verification_result,
@@ -536,14 +573,31 @@ class UnifiedImportService:
         original_deleted = False
         original_delete_error: str | None = None
 
-        if delete_original and original_uuid:
-            delete_result = self.delete_original_video(original_uuid, original_filename)
+        # Use original_uuid from download result if not provided as argument
+        # This allows AWS items to use the UUID extracted from metadata JSON
+        effective_original_uuid = original_uuid or download_result.original_uuid
+
+        if delete_original and effective_original_uuid:
+            delete_result = self.delete_original_video(effective_original_uuid, original_filename)
             original_deleted = delete_result.success
             if not delete_result.success:
                 original_delete_error = delete_result.error_message
                 logger.warning(
-                    f"Failed to delete original video {original_uuid}: {original_delete_error}"
+                    f"Failed to delete original video {effective_original_uuid}: {original_delete_error}"
                 )
+        elif delete_original and not effective_original_uuid:
+            # delete_original requested but no UUID available
+            original_delete_error = "Original video UUID not available in metadata"
+            logger.warning(f"Cannot delete original video: {original_delete_error}")
+
+        # Notify status: import completed
+        if status_callback:
+            status_callback(
+                local_path.name,
+                "imported",
+                verification_result,
+                albums,
+            )
 
         return UnifiedImportResult(
             success=True,
@@ -558,7 +612,9 @@ class UnifiedImportService:
             s3_deleted=s3_deleted,
             original_deleted=original_deleted,
             original_delete_error=original_delete_error,
-            original_uuid=original_uuid,
+            original_uuid=effective_original_uuid,
+            metadata_embedded=metadata_embedded,
+            embed_result=embed_result,
             metadata_verified=metadata_verified,
             metadata_mismatch=metadata_mismatch,
             verification_result=verification_result,
@@ -571,7 +627,7 @@ class UnifiedImportService:
         user_id: str | None,
         max_concurrent: int,
         progress_callback: Callable[..., Any] | None,
-        status_callback: Callable[[str, str], None] | None = None,
+        status_callback: Callable[..., None] | None = None,
         delete_original: bool = False,
         original_uuids: dict[str, str] | None = None,
         force_import: bool = False,

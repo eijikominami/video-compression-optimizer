@@ -260,7 +260,7 @@ class TestSwiftBridgePhotosInterface:
                 stderr="",
             )
 
-            uuid = bridge.import_video(video_file, album_name="Test Album")
+            uuid = bridge.import_video(video_file, album_names=["Test Album"])
 
             assert uuid == "NEW-UUID-123"
 

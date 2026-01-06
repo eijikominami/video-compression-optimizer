@@ -288,8 +288,8 @@ def calculate_progress(files: list[dict]) -> tuple[int, str]:
 
     File status to progress mapping:
     - PENDING: 0%
-    - CONVERTING: 0-30% (scaled from MediaConvert jobPercentComplete)
-    - VERIFYING: 65% (fixed, SSIM calculation has no progress API)
+    - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
+    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
     - COMPLETED/DOWNLOADED/FAILED: 100%
 
     Task progress is the average of all file progress percentages.
@@ -310,17 +310,18 @@ def calculate_progress(files: list[dict]) -> tuple[int, str]:
             # 0%
             pass
         elif status == "CONVERTING":
-            # 0-30% range, scaled from MediaConvert jobPercentComplete
+            # 0-65% range, scaled from MediaConvert jobPercentComplete
             job_id = f.get("mediaconvert_job_id")
             if job_id:
                 mc_progress = get_mediaconvert_job_progress(job_id)
-                # Scale 0-100% to 0-30%
-                total_progress += int(mc_progress * 0.3)
+                # Scale 0-100% to 0-65%
+                total_progress += int(mc_progress * 0.65)
             # else: 0%
             current_step = "converting"
         elif status == "VERIFYING":
-            # 65% fixed (SSIM calculation has no progress API)
-            total_progress += 65
+            # 65-99% range: 65 + (verification_progress * 0.34)
+            verification_progress = float(f.get("verification_progress", 0))
+            total_progress += 65 + int(verification_progress * 0.34)
             current_step = "verifying"
         elif status in ("COMPLETED", "DOWNLOADED", "FAILED"):
             # 100%
@@ -348,8 +349,8 @@ def calculate_progress_simple(files: list[dict]) -> tuple[int, str]:
 
     File status to progress mapping:
     - PENDING: 0%
-    - CONVERTING: 15% (midpoint of 0-30% range)
-    - VERIFYING: 65% (fixed)
+    - CONVERTING: 32% (midpoint of 0-65% range)
+    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
     - COMPLETED/DOWNLOADED/FAILED: 100%
 
     Returns:
@@ -367,10 +368,12 @@ def calculate_progress_simple(files: list[dict]) -> tuple[int, str]:
         if status == "PENDING":
             pass  # 0%
         elif status == "CONVERTING":
-            total_progress += 15  # Midpoint of 0-30%
+            total_progress += 32  # Midpoint of 0-65%
             current_step = "converting"
         elif status == "VERIFYING":
-            total_progress += 65
+            # 65-99% range: 65 + (verification_progress * 0.34)
+            verification_progress = float(f.get("verification_progress", 0))
+            total_progress += 65 + int(verification_progress * 0.34)
             current_step = "verifying"
         elif status in ("COMPLETED", "DOWNLOADED", "FAILED"):
             total_progress += 100
@@ -392,8 +395,8 @@ def calculate_file_progress(file: dict) -> int:
 
     File status to progress mapping:
     - PENDING: 0%
-    - CONVERTING: 0-30% (scaled from MediaConvert jobPercentComplete)
-    - VERIFYING: 65% (fixed, SSIM calculation has no progress API)
+    - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
+    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
     - COMPLETED/DOWNLOADED/FAILED: 100%
 
     Returns:
@@ -404,15 +407,17 @@ def calculate_file_progress(file: dict) -> int:
     if status == "PENDING":
         return 0
     elif status == "CONVERTING":
-        # 0-30% range, scaled from MediaConvert jobPercentComplete
+        # 0-65% range, scaled from MediaConvert jobPercentComplete
         job_id = file.get("mediaconvert_job_id")
         if job_id:
             mc_progress = get_mediaconvert_job_progress(job_id)
-            # Scale 0-100% to 0-30%
-            return int(mc_progress * 0.3)
+            # Scale 0-100% to 0-65%
+            return int(mc_progress * 0.65)
         return 0
     elif status == "VERIFYING":
-        return 65
+        # 65-99% range: 65 + (verification_progress * 0.34)
+        verification_progress = float(file.get("verification_progress", 0))
+        return 65 + int(verification_progress * 0.34)
     elif status in ("COMPLETED", "DOWNLOADED", "FAILED"):
         return 100
     return 0
@@ -435,6 +440,7 @@ def format_task_response(task: dict, include_download_urls: bool = False) -> dic
             "conversion_progress_percentage": file_progress,
             "error_message": file.get("error_message"),
             "output_s3_key": file.get("output_s3_key"),
+            "metadata_s3_key": file.get("metadata_s3_key"),
             "best_effort": file.get("best_effort", False),
             "download_available": file.get("download_available", True),
         }
