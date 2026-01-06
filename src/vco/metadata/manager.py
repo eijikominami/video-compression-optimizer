@@ -89,7 +89,7 @@ class MetadataManager:
 
         # Get file creation/modification times
         stat = video_path.stat()
-        creation_date = datetime.fromtimestamp(stat.st_birthtime)
+        creation_date = datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime))
 
         # Try to extract metadata using FFprobe
         capture_date = None
@@ -271,7 +271,7 @@ class MetadataManager:
         try:
             # Get original file dates
             stat = original_path.stat()
-            creation_date = datetime.fromtimestamp(stat.st_birthtime)
+            creation_date = datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime))
             modification_date = datetime.fromtimestamp(stat.st_mtime)
 
             return self.set_file_dates(

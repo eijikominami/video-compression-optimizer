@@ -127,6 +127,8 @@ class CancelCommand:
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
+        if credentials is None:
+            raise RuntimeError("AWS credentials not available")
         auth = AWS4Auth(
             credentials.access_key,
             credentials.secret_key,

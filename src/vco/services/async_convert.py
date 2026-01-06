@@ -396,6 +396,8 @@ class AsyncConvertCommand:
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
+        if credentials is None:
+            raise RuntimeError("AWS credentials not available")
         auth = AWS4Auth(
             credentials.access_key,
             credentials.secret_key,
@@ -432,10 +434,13 @@ class AsyncConvertCommand:
 
             for page in paginator.paginate(Bucket=self.s3_bucket, Prefix=prefix):
                 if "Contents" in page:
-                    objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                    objects: list[dict[str, str]] = [
+                        {"Key": obj["Key"]} for obj in page["Contents"]
+                    ]
                     if objects:
                         self.s3_client.delete_objects(
-                            Bucket=self.s3_bucket, Delete={"Objects": objects}
+                            Bucket=self.s3_bucket,
+                            Delete={"Objects": objects},  # type: ignore[typeddict-item]
                         )
                         logger.info(f"Cleaned up {len(objects)} files for task {task_id}")
         except Exception as e:

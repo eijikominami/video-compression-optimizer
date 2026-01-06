@@ -573,6 +573,14 @@ class AwsImportService:
             # Create AWS session
             session = boto3.Session(profile_name=self.profile_name, region_name=self.region)
             credentials = session.get_credentials()
+            if credentials is None:
+                return CleanupResult(
+                    success=False,
+                    file_id=file_id,
+                    status="",
+                    s3_deleted=False,
+                    error_message="AWS credentials not available",
+                )
 
             # Build request URL
             url = f"{self.api_url}/tasks/{task_id}/files/{file_id}/cleanup"
@@ -590,7 +598,9 @@ class AwsImportService:
                     "X-User-Id": user_id,
                 },
             )
-            SigV4Auth(credentials, "execute-api", self.region).add_auth(request)
+            SigV4Auth(credentials.get_frozen_credentials(), "execute-api", self.region).add_auth(
+                request
+            )
 
             # Make request
             response = requests.post(
