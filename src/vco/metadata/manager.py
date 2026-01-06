@@ -25,6 +25,8 @@ class VideoMetadata:
     title: str | None = None
     description: str | None = None
     location: tuple[float, float] | None = None  # (latitude, longitude)
+    original_uuid: str | None = None  # UUID of original video in Photos library
+    original_filename: str | None = None  # Original filename for reference
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -35,6 +37,8 @@ class VideoMetadata:
             "title": self.title,
             "description": self.description,
             "location": list(self.location) if self.location else None,
+            "original_uuid": self.original_uuid,
+            "original_filename": self.original_filename,
         }
 
     @classmethod
@@ -59,6 +63,8 @@ class VideoMetadata:
             title=data.get("title"),
             description=data.get("description"),
             location=location,
+            original_uuid=data.get("original_uuid"),
+            original_filename=data.get("original_filename"),
         )
 
 
@@ -83,7 +89,7 @@ class MetadataManager:
 
         # Get file creation/modification times
         stat = video_path.stat()
-        creation_date = datetime.fromtimestamp(stat.st_birthtime)
+        creation_date = datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime))
 
         # Try to extract metadata using FFprobe
         capture_date = None
@@ -265,7 +271,7 @@ class MetadataManager:
         try:
             # Get original file dates
             stat = original_path.stat()
-            creation_date = datetime.fromtimestamp(stat.st_birthtime)
+            creation_date = datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime))
             modification_date = datetime.fromtimestamp(stat.st_mtime)
 
             return self.set_file_dates(

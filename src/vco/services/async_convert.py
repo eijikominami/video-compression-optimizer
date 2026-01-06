@@ -242,11 +242,22 @@ class AsyncConvertCommand:
             True if file exists and is readable
         """
         try:
-            if not path.exists() or not path.is_file():
+            logger.debug(f"Checking file availability: {path}")
+            if not path.exists():
+                logger.debug(f"File does not exist: {path}")
+                return False
+            if not path.is_file():
+                logger.debug(f"Path is not a file: {path}")
                 return False
             size = path.stat().st_size
-            return size > 0
-        except (OSError, PermissionError):
+            logger.debug(f"File size: {size} bytes")
+            if size <= 0:
+                logger.debug(f"File size is zero: {path}")
+                return False
+            logger.debug(f"File is available: {path}")
+            return True
+        except (OSError, PermissionError) as e:
+            logger.debug(f"Error accessing file {path}: {e}")
             return False
 
     def _get_machine_id(self) -> str:
@@ -288,6 +299,10 @@ class AsyncConvertCommand:
             if video.location:
                 metadata.location = video.location
 
+            # Set original video identifiers for deletion after import
+            metadata.original_uuid = video.uuid
+            metadata.original_filename = video.filename
+
             return metadata
         except Exception as e:
             logger.warning(f"Failed to extract metadata: {e}")
@@ -296,6 +311,8 @@ class AsyncConvertCommand:
                 creation_date=video.creation_date,
                 albums=video.albums,
                 location=video.location,
+                original_uuid=video.uuid,
+                original_filename=video.filename,
             )
 
     def _upload_file(
@@ -345,6 +362,8 @@ class AsyncConvertCommand:
             "creation_date": metadata.creation_date.isoformat() if metadata.creation_date else None,
             "location": list(metadata.location) if metadata.location else None,
             "albums": metadata.albums or [],
+            "original_uuid": metadata.original_uuid,
+            "original_filename": metadata.original_filename,
         }
 
         self.s3_client.put_object(
@@ -377,6 +396,8 @@ class AsyncConvertCommand:
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
+        if credentials is None:
+            raise RuntimeError("AWS credentials not available")
         auth = AWS4Auth(
             credentials.access_key,
             credentials.secret_key,
@@ -413,10 +434,13 @@ class AsyncConvertCommand:
 
             for page in paginator.paginate(Bucket=self.s3_bucket, Prefix=prefix):
                 if "Contents" in page:
-                    objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                    objects: list[dict[str, str]] = [
+                        {"Key": obj["Key"]} for obj in page["Contents"]
+                    ]
                     if objects:
                         self.s3_client.delete_objects(
-                            Bucket=self.s3_bucket, Delete={"Objects": objects}
+                            Bucket=self.s3_bucket,
+                            Delete={"Objects": objects},  # type: ignore[typeddict-item]
                         )
                         logger.info(f"Cleaned up {len(objects)} files for task {task_id}")
         except Exception as e:

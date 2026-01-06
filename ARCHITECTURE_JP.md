@@ -81,7 +81,11 @@ Photos ライブラリアクセス用のネイティブ Swift 実装（`bin/vco-
    b. 品質検証（SSIM チェック）
    c. DynamoDB への状態更新
 7. ユーザーが `vco status` で状態を確認
-8. ユーザーが `vco import` で完了ファイルをインポート（Swift PhotoKit）
+8. ユーザーが `vco import` で完了ファイルをインポート:
+   a. S3 から変換済み動画をダウンロード
+   b. exiftool でメタデータを埋め込み（タイムゾーン付き Keys:CreationDate）
+   c. メタデータが元動画と一致するか検証
+   d. Photos ライブラリにインポート（Swift PhotoKit）
 ```
 
 ### ファイル状態遷移
@@ -98,6 +102,7 @@ PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
 | CLI | Python 3.10+、Click、Rich |
 | Photos スキャン | osxphotos |
 | iCloud ダウンロード・インポート | Swift PhotoKit |
+| メタデータ埋め込み | exiftool |
 | AWS SDK | boto3 |
 | インフラストラクチャ | SAM/CloudFormation |
 | 動画処理 | AWS MediaConvert |

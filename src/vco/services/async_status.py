@@ -45,6 +45,7 @@ class FileDetail:
     original_size_bytes: int | None = None
     output_size_bytes: int | None = None
     output_s3_key: str | None = None
+    metadata_s3_key: str | None = None
     compression_ratio: float | None = None
     space_saved_bytes: int | None = None
     space_saved_percent: float | None = None
@@ -175,6 +176,12 @@ class StatusCommand:
             # Parse files
             files = []
             for file_data in response.get("files", []):
+                # Debug: Log raw file data
+                logger.info(f"Raw file data keys: {list(file_data.keys())}")
+                logger.info(f"metadata_s3_key in response: {'metadata_s3_key' in file_data}")
+                if "metadata_s3_key" in file_data:
+                    logger.info(f"metadata_s3_key value: {file_data['metadata_s3_key']}")
+
                 quality_result = file_data.get("quality_result", {})
                 files.append(
                     FileDetail(
@@ -188,6 +195,7 @@ class StatusCommand:
                         output_size_bytes=file_data.get("output_size_bytes")
                         or quality_result.get("converted_size"),
                         output_s3_key=file_data.get("output_s3_key"),
+                        metadata_s3_key=file_data.get("metadata_s3_key"),
                         compression_ratio=quality_result.get("compression_ratio"),
                         space_saved_bytes=quality_result.get("space_saved_bytes"),
                         space_saved_percent=quality_result.get("space_saved_percent"),
@@ -265,6 +273,8 @@ class StatusCommand:
 
         # Get credentials for signing
         credentials = self.session.get_credentials()
+        if credentials is None:
+            raise RuntimeError("AWS credentials not available")
         auth = AWS4Auth(
             credentials.access_key,
             credentials.secret_key,

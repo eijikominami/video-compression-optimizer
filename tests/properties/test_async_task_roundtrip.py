@@ -341,8 +341,8 @@ class TestAsyncTaskProgressCalculation:
         )
         assert task.calculate_progress() == 0
 
-    def test_uploading_task_progress_is_ten(self):
-        """UPLOADING task should have 10% progress."""
+    def test_uploading_task_progress_is_five(self):
+        """UPLOADING task should have 5% progress."""
         task = AsyncTask(
             task_id="test",
             user_id="user",
@@ -352,7 +352,7 @@ class TestAsyncTaskProgressCalculation:
             created_at=datetime.now(),
             updated_at=datetime.now(),
         )
-        assert task.calculate_progress() == 10
+        assert task.calculate_progress() == 5
 
     def test_completed_task_progress_is_hundred(self):
         """COMPLETED task should have 100% progress."""
@@ -373,7 +373,13 @@ class TestAsyncTaskProgressCalculation:
     )
     @settings(max_examples=50)
     def test_converting_task_progress(self, completed_count, total_count):
-        """CONVERTING task progress should reflect file completion."""
+        """CONVERTING task progress should reflect file completion.
+
+        Progress calculation:
+        - COMPLETED files: 100% each
+        - CONVERTING files: 32% each (midpoint default)
+        - Overall: average of all file progress values
+        """
         # Ensure completed_count <= total_count
         completed_count = min(completed_count, total_count)
 
@@ -400,5 +406,7 @@ class TestAsyncTaskProgressCalculation:
             updated_at=datetime.now(),
         )
 
-        expected_progress = 10 + int((completed_count / total_count) * 70)
+        # Expected: (completed_count * 100 + converting_count * 32) / total_count
+        converting_count = total_count - completed_count
+        expected_progress = (completed_count * 100 + converting_count * 32) // total_count
         assert task.calculate_progress() == expected_progress

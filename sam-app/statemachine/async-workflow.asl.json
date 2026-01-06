@@ -162,7 +162,9 @@
               "job_id.$": "$.conversion.job_id",
               "original_s3_key.$": "$.file.source_s3_key",
               "converted_s3_key.$": "$.job_status.output_s3_key",
-              "metadata_s3_key.$": "$.file.metadata_s3_key"
+              "metadata_s3_key.$": "$.file.metadata_s3_key",
+              "task_id.$": "$.task_id",
+              "file_id.$": "$.file.file_id"
             },
             "ResultPath": "$.quality_result",
             "Next": "IsQualityOk",

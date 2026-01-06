@@ -60,7 +60,8 @@ Get task status.
       "filename": "video1.mp4",
       "status": "COMPLETED",
       "conversion_progress_percentage": 100,
-      "output_s3_key": "output/task123/f1/video1_h265.mp4"
+      "output_s3_key": "output/task123/f1/video1_h265.mp4",
+      "metadata_s3_key": "async/task123/input/f1/metadata.json"
     }
   ],
   "created_at": "2024-01-01T10:00:00Z",
@@ -446,6 +447,10 @@ components:
           type: string
           nullable: true
           description: S3 key for converted file (null if not completed)
+        metadata_s3_key:
+          type: string
+          nullable: true
+          description: S3 key for metadata JSON file (null if not uploaded)
         error_message:
           type: string
           nullable: true
@@ -638,6 +643,10 @@ PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
 
 ## Changelog
 
+- **v1.3.0**: Added metadata_s3_key to FileStatus
+  - Added `metadata_s3_key` field to FileStatus schema
+  - Returns S3 key for metadata JSON file (e.g., `async/{task_id}/input/{file_id}/metadata.json`)
+  - Enables client-side metadata verification during import
 - **v1.2.0**: Replaced download-status with cleanup endpoint
   - Removed `/tasks/{task_id}/download-status` endpoint
   - Added `/tasks/{task_id}/files/{file_id}/cleanup` endpoint

@@ -410,6 +410,12 @@ class UnifiedImportResult:
         original_deleted: Whether original video was deleted from Photos
         original_delete_error: Error message if original deletion failed
         original_uuid: UUID of the original video in Photos library
+        metadata_embedded: Whether metadata was embedded using exiftool
+        embed_result: Detailed embedding result
+        metadata_verified: Whether metadata verification passed
+        metadata_mismatch: Whether metadata verification found mismatches
+        verification_result: Detailed verification result
+        verification_skipped: Whether verification was skipped (e.g., ffprobe unavailable)
     """
 
     success: bool
@@ -431,6 +437,16 @@ class UnifiedImportResult:
     original_delete_error: str | None = None
     original_uuid: str | None = None
 
+    # Metadata embedding fields
+    metadata_embedded: bool = False
+    embed_result: Any = None  # EmbedResult
+
+    # Metadata verification fields
+    metadata_verified: bool = False
+    metadata_mismatch: bool = False
+    verification_result: Any = None  # VerificationResult
+    verification_skipped: bool = False
+
 
 @dataclass
 class UnifiedBatchResult:
@@ -444,6 +460,9 @@ class UnifiedBatchResult:
         aws_successful: Successful AWS imports
         aws_failed: Failed AWS imports
         results: List of individual import results
+        metadata_verified_count: Number of items with verified metadata
+        metadata_mismatch_count: Number of items with metadata mismatches
+        skipped_files: List of filenames skipped due to metadata mismatch
     """
 
     local_total: int = 0
@@ -453,6 +472,11 @@ class UnifiedBatchResult:
     aws_successful: int = 0
     aws_failed: int = 0
     results: list[UnifiedImportResult] = field(default_factory=list)
+
+    # Metadata verification fields
+    metadata_verified_count: int = 0
+    metadata_mismatch_count: int = 0
+    skipped_files: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
