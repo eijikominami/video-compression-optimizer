@@ -377,7 +377,7 @@ class TestAsyncTaskProgressCalculation:
 
         Progress calculation:
         - COMPLETED files: 100% each
-        - CONVERTING files: 32% each (midpoint default)
+        - CONVERTING files: 50% each (midpoint default, VERIFYING removed)
         - Overall: average of all file progress values
         """
         # Ensure completed_count <= total_count
@@ -406,7 +406,8 @@ class TestAsyncTaskProgressCalculation:
             updated_at=datetime.now(),
         )
 
-        # Expected: (completed_count * 100 + converting_count * 32) / total_count
+        # Expected: (completed_count * 100 + converting_count * 50) / total_count
+        # Note: midpoint changed from 32 to 50 after VERIFYING status removal
         converting_count = total_count - completed_count
-        expected_progress = (completed_count * 100 + converting_count * 32) // total_count
+        expected_progress = (completed_count * 100 + converting_count * 50) // total_count
         assert task.calculate_progress() == expected_progress

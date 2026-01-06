@@ -4,7 +4,7 @@ Property 10: Progress Calculation Consistency
 For any list of file statuses, the progress calculated by Lambda and CLI
 SHALL be identical when using the same input data.
 
-Requirements: 6.3, 6.4
+Requirements: 5.1, 5.2, 5.3
 """
 
 import importlib.util
@@ -13,7 +13,6 @@ import sys
 
 from vco.utils.progress import (
     PROGRESS_CONVERTING_MIDPOINT,
-    PROGRESS_VERIFYING,
     calculate_progress,
     calculate_progress_simple,
 )
@@ -69,17 +68,6 @@ class TestProgressCalculationConsistency:
         assert cli_progress == lambda_progress
         assert cli_step == lambda_step
 
-    def test_single_verifying_consistency(self):
-        """Single VERIFYING file produces same result."""
-        files = [{"status": "VERIFYING"}]
-
-        cli_progress, cli_step = calculate_progress_simple(files)
-        lambda_progress, lambda_step = status_app.calculate_progress_simple(files)
-
-        assert cli_progress == lambda_progress
-        assert cli_step == lambda_step
-        assert cli_progress == PROGRESS_VERIFYING
-
     def test_single_converting_consistency(self):
         """Single CONVERTING file produces same result (simple version)."""
         files = [{"status": "CONVERTING"}]
@@ -95,7 +83,7 @@ class TestProgressCalculationConsistency:
         """Mixed statuses produce same result."""
         files = [
             {"status": "COMPLETED"},
-            {"status": "VERIFYING"},
+            {"status": "CONVERTING"},
             {"status": "PENDING"},
         ]
 
@@ -171,9 +159,9 @@ class TestProgressResponseInclusion:
         """format_task_response includes current_step."""
         task = {
             "task_id": "task-123",
-            "status": "VERIFYING",
+            "status": "CONVERTING",
             "quality_preset": "balanced",
-            "files": [{"file_id": "f1", "filename": "v1.mov", "status": "VERIFYING"}],
+            "files": [{"file_id": "f1", "filename": "v1.mov", "status": "CONVERTING"}],
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z",
         }
@@ -181,7 +169,7 @@ class TestProgressResponseInclusion:
         response = status_app.format_task_response(task)
 
         assert "current_step" in response
-        assert response["current_step"] in ["pending", "converting", "verifying", "completed"]
+        assert response["current_step"] in ["pending", "converting", "completed"]
 
     def test_format_task_summary_includes_progress(self):
         """format_task_summary includes progress_percentage."""

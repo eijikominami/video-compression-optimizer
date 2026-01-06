@@ -4,20 +4,20 @@ Property 10: Progress Calculation Consistency
 For any list of file statuses, the progress calculated by Lambda and CLI
 SHALL be identical when using the same input data.
 
-Requirements: 6.4
+Requirements: 5.1, 5.2, 5.3
 """
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vco.utils.progress import (
-    PROGRESS_VERIFYING,
+    PROGRESS_CONVERTING_MIDPOINT,
     calculate_progress,
     calculate_progress_simple,
 )
 
-# Valid file statuses
-VALID_STATUSES = ["PENDING", "CONVERTING", "VERIFYING", "COMPLETED", "FAILED"]
+# Valid file statuses (simplified - VERIFYING removed)
+VALID_STATUSES = ["PENDING", "CONVERTING", "COMPLETED", "FAILED"]
 
 
 @st.composite
@@ -57,7 +57,7 @@ class TestProgressConsistencyProperty:
     def test_current_step_is_valid(self, files):
         """Property: Current step is always a valid value."""
         _, step = calculate_progress(files)
-        assert step in ["pending", "converting", "verifying", "completed"]
+        assert step in ["pending", "converting", "completed"]
 
     @given(files=files_list_strategy())
     @settings(max_examples=100)
@@ -122,12 +122,12 @@ class TestProgressBoundaryConditions:
 
     @given(count=st.integers(min_value=1, max_value=100))
     @settings(max_examples=50)
-    def test_all_verifying_is_65(self, count):
-        """Property: All VERIFYING files result in 65% progress."""
-        files = [{"status": "VERIFYING"} for _ in range(count)]
+    def test_all_converting_is_midpoint(self, count):
+        """Property: All CONVERTING files result in 50% progress (midpoint)."""
+        files = [{"status": "CONVERTING"} for _ in range(count)]
         progress, step = calculate_progress(files)
-        assert progress == PROGRESS_VERIFYING
-        assert step == "verifying"
+        assert progress == PROGRESS_CONVERTING_MIDPOINT
+        assert step == "converting"
 
 
 class TestProgressDeterminism:

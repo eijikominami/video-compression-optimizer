@@ -553,7 +553,7 @@ class TestResponseValidation:
 
     def test_validate_file_response_all_statuses(self):
         """All valid file statuses pass validation."""
-        for status in ["PENDING", "CONVERTING", "VERIFYING", "COMPLETED", "FAILED"]:
+        for status in ["PENDING", "CONVERTING", "COMPLETED", "FAILED"]:
             file = {"file_id": "file-1", "filename": "video.mov", "status": status}
             is_valid, error = status_app.validate_file_response(file, 0)
             assert is_valid is True, f"Status {status} should be valid"
@@ -615,7 +615,6 @@ class TestResponseValidation:
             "PENDING",
             "UPLOADING",
             "CONVERTING",
-            "VERIFYING",
             "COMPLETED",
             "PARTIALLY_COMPLETED",
             "FAILED",
@@ -646,7 +645,6 @@ class TestResponseSchemaConstants:
             "PENDING",
             "UPLOADING",
             "CONVERTING",
-            "VERIFYING",
             "COMPLETED",
             "PARTIALLY_COMPLETED",
             "FAILED",
@@ -659,7 +657,6 @@ class TestResponseSchemaConstants:
         expected = [
             "PENDING",
             "CONVERTING",
-            "VERIFYING",
             "COMPLETED",
             "DOWNLOADED",
             "REMOVED",
@@ -669,7 +666,7 @@ class TestResponseSchemaConstants:
 
     def test_valid_current_steps_defined(self):
         """VALID_CURRENT_STEPS contains all expected steps."""
-        expected = ["pending", "converting", "verifying", "completed"]
+        expected = ["pending", "converting", "completed"]
         assert status_app.VALID_CURRENT_STEPS == expected
 
     def test_task_detail_required_fields(self):
