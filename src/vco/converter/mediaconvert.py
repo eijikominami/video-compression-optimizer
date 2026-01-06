@@ -89,10 +89,10 @@ class MediaConvertClient:
         self.role_arn = role_arn
 
         # Create boto3 session
-        session_kwargs: dict[str, str] = {"region_name": region}
         if profile_name:
-            session_kwargs["profile_name"] = profile_name
-        self.session = boto3.Session(**session_kwargs)
+            self.session = boto3.Session(region_name=region, profile_name=profile_name)
+        else:
+            self.session = boto3.Session(region_name=region)
 
         # Get MediaConvert endpoint
         self._endpoint_url = self._get_mediaconvert_endpoint()

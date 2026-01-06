@@ -73,10 +73,10 @@ class QualityChecker:
         self.lambda_function_name = lambda_function_name
 
         # Create boto3 session
-        session_kwargs: dict[str, str] = {"region_name": region}
         if profile_name:
-            session_kwargs["profile_name"] = profile_name
-        self.session = boto3.Session(**session_kwargs)
+            self.session = boto3.Session(region_name=region, profile_name=profile_name)
+        else:
+            self.session = boto3.Session(region_name=region)
 
         # Create clients
         # Lambda client with extended timeout for long-running quality checks
