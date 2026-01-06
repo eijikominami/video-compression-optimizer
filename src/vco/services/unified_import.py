@@ -14,6 +14,7 @@ from typing import Any
 
 from vco.metadata.manager import VideoMetadata
 from vco.models.types import (
+    DeleteResult,
     ImportableItem,
     UnifiedBatchResult,
     UnifiedClearResult,
@@ -90,6 +91,9 @@ class UnifiedImportService:
         item_id: str,
         user_id: str | None = None,
         progress_callback: Callable[..., Any] | None = None,
+        status_callback: Callable[[str, str], None] | None = None,
+        delete_original: bool = False,
+        original_uuid: str | None = None,
     ) -> UnifiedImportResult:
         """Import a single item from AWS source.
 
@@ -100,11 +104,14 @@ class UnifiedImportService:
             item_id: Item ID to import
             user_id: User identifier for AWS
             progress_callback: Callback for download progress (AWS only)
+            status_callback: Callback for status updates (filename, status)
+            delete_original: Whether to delete original video after import
+            original_uuid: UUID of original video in Photos library (for deletion)
 
         Returns:
             UnifiedImportResult
 
-        Requirements: 2.1, 3.1
+        Requirements: 2.1, 3.1, 5.1, 5.4
         """
         if not self._is_aws_item(item_id):
             return UnifiedImportResult(
@@ -115,7 +122,14 @@ class UnifiedImportService:
                 converted_filename="",
                 error_message="Local imports are not supported. Use AWS item ID format (task_id:file_id).",
             )
-        return self._import_aws_item(item_id, user_id, progress_callback)
+        return self._import_aws_item(
+            item_id,
+            user_id,
+            progress_callback,
+            status_callback=status_callback,
+            delete_original=delete_original,
+            original_uuid=original_uuid,
+        )
 
     def import_all(
         self,
@@ -123,6 +137,8 @@ class UnifiedImportService:
         max_concurrent_downloads: int = 3,
         progress_callback: Callable[..., Any] | None = None,
         status_callback: Callable[[str, str], None] | None = None,
+        delete_original: bool = False,
+        original_uuids: dict[str, str] | None = None,
     ) -> UnifiedBatchResult:
         """Import all items from AWS sources.
 
@@ -133,11 +149,13 @@ class UnifiedImportService:
             max_concurrent_downloads: Maximum concurrent AWS downloads
             progress_callback: Callback for download progress
             status_callback: Callback for status updates (filename, status)
+            delete_original: Whether to delete original videos after import
+            original_uuids: Mapping of item_id to original video UUID for deletion
 
         Returns:
             UnifiedBatchResult
 
-        Requirements: 4.1, 4.4, 4.5
+        Requirements: 4.1, 4.4, 4.5, 5.5, 5.9
         """
         result = UnifiedBatchResult()
 
@@ -153,6 +171,8 @@ class UnifiedImportService:
                 max_concurrent_downloads,
                 progress_callback,
                 status_callback,
+                delete_original=delete_original,
+                original_uuids=original_uuids,
             )
             for import_result in aws_results:
                 result.results.append(import_result)
@@ -265,8 +285,10 @@ class UnifiedImportService:
         user_id: str | None,
         progress_callback: Callable[..., Any] | None,
         status_callback: Callable[[str, str], None] | None = None,
+        delete_original: bool = False,
+        original_uuid: str | None = None,
     ) -> UnifiedImportResult:
-        """Import an AWS item: download, import to Photos, delete S3."""
+        """Import an AWS item: download, import to Photos, delete S3, optionally delete original."""
         if not self.aws_service:
             return UnifiedImportResult(
                 success=False,
@@ -411,17 +433,47 @@ class UnifiedImportService:
                     f"Failed to delete metadata file {download_result.metadata_path}: {e}"
                 )
 
+        # Handle original video deletion if requested
+        original_deleted = False
+        original_delete_error: str | None = None
+        original_filename = ""
+
+        if delete_original and original_uuid:
+            # Get original filename from metadata if available
+            if download_result.metadata_path:
+                try:
+                    import json
+
+                    metadata_path = download_result.metadata_path
+                    if metadata_path.exists():
+                        with open(metadata_path) as f:
+                            metadata_dict = json.load(f)
+                        original_filename = metadata_dict.get("original_filename", "")
+                except Exception:
+                    pass
+
+            delete_result = self.delete_original_video(original_uuid, original_filename)
+            original_deleted = delete_result.success
+            if not delete_result.success:
+                original_delete_error = delete_result.error_message
+                logger.warning(
+                    f"Failed to delete original video {original_uuid}: {original_delete_error}"
+                )
+
         return UnifiedImportResult(
             success=True,
             item_id=item_id,
             source="aws",
-            original_filename="",  # Not available from AWS
+            original_filename=original_filename,
             converted_filename=local_path.name,
             albums=albums,
             downloaded=True,
             download_resumed=download_result.download_resumed,
             checksum_verified=download_result.checksum_verified,
             s3_deleted=s3_deleted,
+            original_deleted=original_deleted,
+            original_delete_error=original_delete_error,
+            original_uuid=original_uuid,
         )
 
     def _import_aws_items_parallel(
@@ -431,9 +483,12 @@ class UnifiedImportService:
         max_concurrent: int,
         progress_callback: Callable[..., Any] | None,
         status_callback: Callable[[str, str], None] | None = None,
+        delete_original: bool = False,
+        original_uuids: dict[str, str] | None = None,
     ) -> list[UnifiedImportResult]:
         """Import AWS items in parallel with concurrency limit."""
         results: list[UnifiedImportResult] = []
+        original_uuids = original_uuids or {}
 
         with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
             futures = {
@@ -443,6 +498,8 @@ class UnifiedImportService:
                     user_id,
                     progress_callback,
                     status_callback,
+                    delete_original,
+                    original_uuids.get(item.item_id),
                 ): item
                 for item in items
             }
@@ -511,3 +568,42 @@ class UnifiedImportService:
             s3_deleted=cleanup_result.s3_deleted,
             error_message=cleanup_result.error_message if not cleanup_result.success else None,
         )
+
+    def delete_original_video(self, uuid: str, filename: str) -> DeleteResult:
+        """Delete original video from Photos library.
+
+        Moves the video to Photos trash using SwiftBridge.
+
+        Args:
+            uuid: UUID of the video in Photos library
+            filename: Filename for display in result
+
+        Returns:
+            DeleteResult with success status
+
+        Requirements: 5.2, 5.6
+        """
+        try:
+            success = self.swift_bridge.delete_video(uuid)
+            return DeleteResult(
+                success=success,
+                uuid=uuid,
+                filename=filename,
+                error_message=None if success else "Failed to delete video",
+            )
+        except PhotosAccessError as e:
+            logger.warning(f"Failed to delete original video {uuid}: {e}")
+            return DeleteResult(
+                success=False,
+                uuid=uuid,
+                filename=filename,
+                error_message=str(e),
+            )
+        except Exception as e:
+            logger.warning(f"Unexpected error deleting original video {uuid}: {e}")
+            return DeleteResult(
+                success=False,
+                uuid=uuid,
+                filename=filename,
+                error_message=str(e),
+            )

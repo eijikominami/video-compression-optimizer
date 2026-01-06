@@ -547,3 +547,281 @@ class TestProperty2OutputContainsRequiredFields:
             # Property: AWS items have non-null task_id and file_id
             assert item["task_id"] is not None
             assert item["file_id"] is not None
+
+
+class TestProperty20OriginalDeletionPromptBehavior:
+    """Property 20: Original deletion prompt behavior.
+
+    For any successful import without --delete-original flag,
+    the system SHALL prompt for original deletion (unless -y flag).
+
+    Validates: Requirements 5.1
+    """
+
+    @given(
+        task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+    )
+    @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+    def test_no_deletion_without_flag_and_uuid(self, task_id, file_id):
+        """Without --delete-original flag and no UUID, no deletion occurs."""
+        from vco.photos.swift_bridge import SwiftBridge
+        from vco.services.aws_import import AwsDownloadResult, CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock(spec=SwiftBridge)
+
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id=task_id,
+            file_id=file_id,
+            local_path=Path(f"/tmp/{file_id}_h265.mp4"),
+            checksum_verified=True,
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id=file_id,
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                f"{task_id}:{file_id}",
+                delete_original=False,
+                original_uuid=None,
+            )
+
+        # Property: import succeeds
+        assert result.success is True
+
+        # Property: no deletion attempted without UUID
+        assert result.original_deleted is False
+        swift_bridge.delete_video.assert_not_called()
+
+
+class TestProperty21OriginalDeletionWithYFlag:
+    """Property 21: Original deletion with -y flag.
+
+    For any import with -y flag but without --delete-original,
+    the system SHALL NOT delete original and SHALL NOT prompt.
+
+    Validates: Requirements 5.10
+    """
+
+    @given(
+        task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        original_uuid=st.text(min_size=8, max_size=36, alphabet="abcdef0123456789-"),
+    )
+    @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+    def test_y_flag_without_delete_original_no_deletion(self, task_id, file_id, original_uuid):
+        """With -y flag but without --delete-original, no deletion occurs."""
+        from vco.photos.swift_bridge import SwiftBridge
+        from vco.services.aws_import import AwsDownloadResult, CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock(spec=SwiftBridge)
+
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id=task_id,
+            file_id=file_id,
+            local_path=Path(f"/tmp/{file_id}_h265.mp4"),
+            checksum_verified=True,
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id=file_id,
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            # Simulate -y flag: delete_original=False, original_uuid provided
+            result = service.import_item(
+                f"{task_id}:{file_id}",
+                delete_original=False,  # -y flag without --delete-original
+                original_uuid=original_uuid,
+            )
+
+        # Property: import succeeds
+        assert result.success is True
+
+        # Property: no deletion attempted (delete_original=False)
+        assert result.original_deleted is False
+        swift_bridge.delete_video.assert_not_called()
+
+
+class TestProperty22OriginalDeletionWithDeleteOriginalFlag:
+    """Property 22: Original deletion with --delete-original flag.
+
+    For any import with --delete-original flag and valid UUID,
+    the system SHALL delete original without prompting.
+
+    Validates: Requirements 5.4
+    """
+
+    @given(
+        task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        original_uuid=st.text(min_size=8, max_size=36, alphabet="abcdef0123456789-"),
+    )
+    @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+    def test_delete_original_flag_deletes_without_prompt(self, task_id, file_id, original_uuid):
+        """With --delete-original flag and UUID, deletion occurs without prompt."""
+        from vco.photos.swift_bridge import SwiftBridge
+        from vco.services.aws_import import AwsDownloadResult, CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock(spec=SwiftBridge)
+
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id=task_id,
+            file_id=file_id,
+            local_path=Path(f"/tmp/{file_id}_h265.mp4"),
+            checksum_verified=True,
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        swift_bridge.delete_video.return_value = True
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id=file_id,
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                f"{task_id}:{file_id}",
+                delete_original=True,
+                original_uuid=original_uuid,
+            )
+
+        # Property: import succeeds
+        assert result.success is True
+
+        # Property: deletion was attempted with correct UUID
+        swift_bridge.delete_video.assert_called_once_with(original_uuid)
+
+        # Property: deletion succeeded
+        assert result.original_deleted is True
+        assert result.original_uuid == original_uuid
+
+    @given(
+        task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        original_uuid=st.text(min_size=8, max_size=36, alphabet="abcdef0123456789-"),
+    )
+    @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+    def test_delete_original_failure_does_not_fail_import(self, task_id, file_id, original_uuid):
+        """Original deletion failure does not fail the import (Requirement 5.7)."""
+        from vco.photos.swift_bridge import SwiftBridge
+        from vco.services.aws_import import AwsDownloadResult, CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock(spec=SwiftBridge)
+
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id=task_id,
+            file_id=file_id,
+            local_path=Path(f"/tmp/{file_id}_h265.mp4"),
+            checksum_verified=True,
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        # Deletion fails
+        swift_bridge.delete_video.return_value = False
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id=file_id,
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                f"{task_id}:{file_id}",
+                delete_original=True,
+                original_uuid=original_uuid,
+            )
+
+        # Property: import still succeeds despite deletion failure
+        assert result.success is True
+
+        # Property: deletion was attempted
+        swift_bridge.delete_video.assert_called_once_with(original_uuid)
+
+        # Property: deletion failure is recorded
+        assert result.original_deleted is False
+        assert result.original_delete_error is not None
+
+    @given(
+        task_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+        file_id=st.text(min_size=8, max_size=16, alphabet="abcdef0123456789"),
+    )
+    @settings(max_examples=15, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+    def test_delete_original_flag_without_uuid_no_deletion(self, task_id, file_id):
+        """With --delete-original flag but no UUID, no deletion occurs."""
+        from vco.photos.swift_bridge import SwiftBridge
+        from vco.services.aws_import import AwsDownloadResult, CleanupResult
+
+        aws_service = MagicMock(spec=AwsImportService)
+        swift_bridge = MagicMock(spec=SwiftBridge)
+
+        aws_service.download_and_prepare.return_value = AwsDownloadResult(
+            success=True,
+            task_id=task_id,
+            file_id=file_id,
+            local_path=Path(f"/tmp/{file_id}_h265.mp4"),
+            checksum_verified=True,
+        )
+        swift_bridge.import_video.return_value = "new-uuid-123"
+        aws_service.cleanup_file.return_value = CleanupResult(
+            success=True,
+            file_id=file_id,
+            status="DOWNLOADED",
+            s3_deleted=True,
+        )
+
+        service = UnifiedImportService(
+            aws_service=aws_service,
+            swift_bridge=swift_bridge,
+        )
+
+        with patch.object(Path, "unlink"):
+            result = service.import_item(
+                f"{task_id}:{file_id}",
+                delete_original=True,
+                original_uuid=None,  # No UUID provided
+            )
+
+        # Property: import succeeds
+        assert result.success is True
+
+        # Property: no deletion attempted without UUID
+        assert result.original_deleted is False
+        swift_bridge.delete_video.assert_not_called()

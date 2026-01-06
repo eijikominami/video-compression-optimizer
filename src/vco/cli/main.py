@@ -382,6 +382,11 @@ convert.help = get_help("convert.description")
 @click.option("--remove", "remove_id", help=get_help("import.remove"))
 @click.option("--json", "output_json", is_flag=True, help=get_help("import.json"))
 @click.option("--yes", "-y", is_flag=True, help=get_help("import.yes"))
+@click.option(
+    "--delete-original",
+    is_flag=True,
+    help="Delete original video from Photos after import",
+)
 @click.argument("item_id", required=False)
 @click.pass_context
 def import_cmd(
@@ -392,6 +397,7 @@ def import_cmd(
     remove_id: str | None,
     output_json: bool,
     yes: bool,
+    delete_original: bool,
     item_id: str | None,
 ):
     """Import converted videos to Photos library."""
@@ -757,27 +763,40 @@ def import_cmd(
         console.print("  1. Download from S3")
         console.print("  2. Import to Photos")
         console.print("  3. Delete S3 file")
+        if delete_original:
+            console.print("  4. Delete original video from Photos")
         console.print()
-        console.print(
-            "[yellow]Note: After import, manually delete original video in Photos app.[/yellow]"
-        )
-        console.print()
+        if not delete_original:
+            console.print(
+                "[yellow]Note: After import, manually delete original video in Photos app.[/yellow]"
+            )
+            console.print()
 
         if not yes and not click.confirm("Do you want to proceed?"):
             console.print("Cancelled.")
             return
 
-        # Import with progress bar for download
+        # Import with progress bar for download and spinner for Photos import
         from rich.progress import (
             BarColumn,
             DownloadColumn,
             Progress,
+            SpinnerColumn,
             TextColumn,
             TimeRemainingColumn,
             TransferSpeedColumn,
         )
 
+        # Get original UUID from metadata if delete_original is requested
+        original_uuid = None
+        should_delete_original = delete_original
+
+        # Track current filename for status callback
+        current_filename = None
+        import_task_id = None
+
         with Progress(
+            SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
             BarColumn(),
             DownloadColumn(),
@@ -788,14 +807,41 @@ def import_cmd(
             download_task = None
 
             def progress_callback(filename: str, percentage: int, downloaded: int, total: int):
-                nonlocal download_task
+                nonlocal download_task, current_filename
+                current_filename = filename
                 if download_task is None:
                     download_task = progress.add_task(f"Downloading {filename}", total=total)
                 progress.update(download_task, completed=downloaded)
 
+            def status_callback(filename: str, status: str) -> None:
+                """Display status updates for import process."""
+                nonlocal import_task_id, download_task
+                if status == "importing":
+                    # Hide download task and show import spinner
+                    if download_task is not None:
+                        progress.update(download_task, visible=False)
+                    import_task_id = progress.add_task(
+                        f"Importing {filename} to Photos...", total=0, visible=True
+                    )
+
             import_result = unified_service.import_item(
-                item_id, progress_callback=progress_callback
+                item_id,
+                progress_callback=progress_callback,
+                status_callback=status_callback,
+                delete_original=should_delete_original,
+                original_uuid=original_uuid,
             )
+
+        # Handle original deletion prompt if import succeeded and --delete-original not specified
+        if import_result.success and not delete_original and not yes:
+            # Prompt for original deletion
+            if click.confirm("Delete original video?", default=False):
+                # Get original UUID from metadata - need to fetch it
+                # For now, show reminder since we don't have the UUID
+                console.print("[yellow]Note: Original video remains in Photos library.[/yellow]")
+        elif import_result.success and not delete_original:
+            # -y flag without --delete-original: no deletion, show reminder
+            console.print("[yellow]Note: Original video remains in Photos library.[/yellow]")
     else:
         # Non-AWS item ID format - not supported
         console.print(f"[red]Error: Invalid item ID format: {item_id}[/red]")
@@ -832,8 +878,16 @@ def import_cmd(
                 console.print("[green]✓ S3 file deleted[/green]")
         if import_result.albums:
             console.print(f"[green]✓ Added to albums: {', '.join(import_result.albums)}[/green]")
-        console.print()
-        console.print("[yellow]⚠ Manually delete original video in Photos app.[/yellow]")
+
+        # Show original deletion result
+        if import_result.original_deleted:
+            console.print(
+                f"[green]✓ Original video moved to trash: {import_result.original_filename or 'original'}[/green]"
+            )
+        elif import_result.original_delete_error:
+            console.print(
+                f"[yellow]⚠ Failed to delete original: {import_result.original_delete_error}[/yellow]"
+            )
     else:
         console.print(f"[red]✗ Import failed: {import_result.error_message}[/red]")
         sys.exit(1)

@@ -132,6 +132,7 @@ vco cancel <task-id>
 vco import --list             # List all importable items (local + AWS)
 vco import --all              # Import all items
 vco import <task-id:file-id>  # Import specific AWS file
+vco import --delete-original <task-id:file-id>  # Import and delete original
 ```
 
 ### Import
@@ -145,8 +146,15 @@ vco import --list
 # Import specified video to Photos
 vco import <item-id>          # Local: review-id, AWS: task-id:file-id
 
+# Import and automatically delete original video
+vco import --delete-original <item-id>
+
 # Batch import all videos (local + AWS)
 vco import --all
+
+# Skip confirmation prompts
+vco import -y <item-id>
+vco import -y --all
 
 # Remove specified ID from queue (also deletes files)
 vco import --remove <item-id>
@@ -159,11 +167,14 @@ vco import --clear
 - Local items: `abc123` (review ID)
 - AWS items: `task-uuid:file-uuid` (task:file format)
 
+**Options**:
+- `--delete-original`: Automatically delete original video from Photos after successful import (moves to trash)
+- `-y, --yes`: Skip confirmation prompts
+
 **Note**: 
 - The `--remove` and `--clear` options delete both the queue entry and the corresponding converted video and metadata files.
 - `--clear` only affects local queue; AWS items remain in S3.
-
-After import, manually delete original videos in Photos app.
+- Without `--delete-original`, you need to manually delete original videos in Photos app after import.
 
 ### Configuration
 

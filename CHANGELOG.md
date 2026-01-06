@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **オリジナル動画削除機能**
+  - `vco import --delete-original` オプションでインポート後にオリジナル動画を自動削除
+  - 削除された動画は Photos のゴミ箱に移動（30 日間復元可能）
+  - 削除失敗時もインポートは成功として扱い、警告メッセージを表示
+- **インポート進捗表示の改善**
+  - 単一インポート時に Photos へのインポート中スピナー表示を追加
+  - ダウンロード完了後、インポート処理中の状態を視覚的に表示
 - **iCloud 自動ダウンロード機能**
   - `vco convert` 実行時に iCloud 動画を自動ダウンロード
   - Swift PhotoKit の `PHAssetResourceManager` を使用したネイティブダウンロード
