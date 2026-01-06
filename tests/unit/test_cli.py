@@ -130,261 +130,271 @@ class TestCliGroup:
 class TestScanCommand:
     """Tests for scan command."""
 
-    @patch("vco.cli.main.PhotosAccessManager")
-    @patch("vco.cli.main.CompressionAnalyzer")
-    @patch("vco.cli.main.ScanService")
-    @patch("vco.cli.main.ConfigManager")
-    def test_scan_basic(self, mock_config, mock_scan_service, mock_analyzer, mock_photos):
+    def test_scan_basic(self):
         """Test basic scan command."""
         from vco.cli.main import cli
 
-        # Setup mocks
-        mock_config_instance = MagicMock()
-        mock_config_instance.get.return_value = "balanced"
-        mock_config.return_value = mock_config_instance
+        with (
+            patch("vco.cli.main.ConfigManager") as mock_config,
+            patch("vco.cli.main.ScanService") as mock_scan_service,
+            patch("vco.cli.main.CompressionAnalyzer"),
+            patch("vco.cli.main.PhotosAccessManager"),
+        ):
+            # Setup mocks
+            mock_config_instance = MagicMock()
+            mock_config_instance.get.return_value = "balanced"
+            mock_config.return_value = mock_config_instance
 
-        mock_scan_instance = MagicMock()
-        mock_result = MagicMock()
-        mock_result.candidates = []
-        mock_result.summary = MagicMock(
-            total_videos=10,
-            conversion_candidates=0,
-            already_optimized=8,
-            professional=1,
-            skipped=1,
-            estimated_total_savings_bytes=0,
-            estimated_total_savings_percent=0.0,
-        )
-        mock_scan_instance.scan.return_value = mock_result
-        mock_scan_service.return_value = mock_scan_instance
+            mock_scan_instance = MagicMock()
+            mock_result = MagicMock()
+            mock_result.candidates = []
+            mock_result.summary = MagicMock(
+                total_videos=10,
+                conversion_candidates=0,
+                already_optimized=8,
+                professional=1,
+                skipped=1,
+                estimated_total_savings_bytes=0,
+                estimated_total_savings_percent=0.0,
+            )
+            mock_scan_instance.scan.return_value = mock_result
+            mock_scan_service.return_value = mock_scan_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["scan"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["scan"])
 
-        assert result.exit_code == 0
-        assert "Scan Summary" in result.output or "No conversion candidates" in result.output
+            assert result.exit_code == 0
+            assert "Scan Summary" in result.output or "No conversion candidates" in result.output
 
-    @patch("vco.cli.main.PhotosAccessManager")
-    @patch("vco.cli.main.CompressionAnalyzer")
-    @patch("vco.cli.main.ScanService")
-    @patch("vco.cli.main.ConfigManager")
-    def test_scan_with_date_range(self, mock_config, mock_scan_service, mock_analyzer, mock_photos):
+    def test_scan_with_date_range(self):
         """Test scan command with date range."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config_instance.get.return_value = "balanced"
-        mock_config.return_value = mock_config_instance
+        with (
+            patch("vco.cli.main.ConfigManager") as mock_config,
+            patch("vco.cli.main.ScanService") as mock_scan_service,
+            patch("vco.cli.main.CompressionAnalyzer"),
+            patch("vco.cli.main.PhotosAccessManager"),
+        ):
+            mock_config_instance = MagicMock()
+            mock_config_instance.get.return_value = "balanced"
+            mock_config.return_value = mock_config_instance
 
-        mock_scan_instance = MagicMock()
-        mock_result = MagicMock()
-        mock_result.candidates = []
-        mock_result.summary = MagicMock(
-            total_videos=5,
-            conversion_candidates=0,
-            already_optimized=5,
-            professional=0,
-            skipped=0,
-            estimated_total_savings_bytes=0,
-            estimated_total_savings_percent=0.0,
-        )
-        mock_scan_instance.scan.return_value = mock_result
-        mock_scan_service.return_value = mock_scan_instance
+            mock_scan_instance = MagicMock()
+            mock_result = MagicMock()
+            mock_result.candidates = []
+            mock_result.summary = MagicMock(
+                total_videos=5,
+                conversion_candidates=0,
+                already_optimized=5,
+                professional=0,
+                skipped=0,
+                estimated_total_savings_bytes=0,
+                estimated_total_savings_percent=0.0,
+            )
+            mock_scan_instance.scan.return_value = mock_result
+            mock_scan_service.return_value = mock_scan_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["scan", "--from", "2024-01", "--to", "2024-06"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["scan", "--from", "2024-01", "--to", "2024-06"])
 
-        assert result.exit_code == 0
+            assert result.exit_code == 0
 
-    @patch("vco.cli.main.PhotosAccessManager")
-    @patch("vco.cli.main.CompressionAnalyzer")
-    @patch("vco.cli.main.ScanService")
-    @patch("vco.cli.main.ConfigManager")
-    def test_scan_json_output(self, mock_config, mock_scan_service, mock_analyzer, mock_photos):
+    def test_scan_json_output(self):
         """Test scan command with JSON output."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config_instance.get.return_value = "balanced"
-        mock_config.return_value = mock_config_instance
+        with (
+            patch("vco.cli.main.ConfigManager") as mock_config,
+            patch("vco.cli.main.ScanService") as mock_scan_service,
+            patch("vco.cli.main.CompressionAnalyzer"),
+            patch("vco.cli.main.PhotosAccessManager"),
+        ):
+            mock_config_instance = MagicMock()
+            mock_config_instance.get.return_value = "balanced"
+            mock_config.return_value = mock_config_instance
 
-        mock_scan_instance = MagicMock()
-        mock_result = MagicMock()
-        mock_result.candidates = []
-        mock_result.to_dict.return_value = {"candidates": [], "summary": {}}
-        mock_scan_instance.scan.return_value = mock_result
-        mock_scan_service.return_value = mock_scan_instance
+            mock_scan_instance = MagicMock()
+            mock_result = MagicMock()
+            mock_result.candidates = []
+            mock_result.to_dict.return_value = {"candidates": [], "summary": {}}
+            mock_scan_instance.scan.return_value = mock_result
+            mock_scan_service.return_value = mock_scan_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["scan", "--json"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["scan", "--json"])
 
-        assert result.exit_code == 0
-        # Should be valid JSON
-        output_data = json.loads(result.output)
-        assert "candidates" in output_data
+            assert result.exit_code == 0
+            # Should be valid JSON
+            output_data = json.loads(result.output)
+            assert "candidates" in output_data
 
 
 class TestConfigCommand:
     """Tests for config command."""
 
-    @patch("vco.cli.main.ConfigManager")
-    def test_config_show(self, mock_config):
+    def test_config_show(self):
         """Test config show command."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config_instance.get_all.return_value = {
-            "schema_version": "1.0",
-            "aws": {
-                "region": "ap-northeast-1",
-                "s3_bucket": "test-bucket",
-                "role_arn": "arn:aws:iam::123456789012:role/test",
-            },
-            "conversion": {
-                "quality_preset": "balanced",
-                "max_concurrent": 5,
-                "staging_folder": "/tmp/staging",
-                "download_timeout": 300,
-            },
-        }
-        mock_config.return_value = mock_config_instance
+        with patch("vco.cli.main.ConfigManager") as mock_config:
+            mock_config_instance = MagicMock()
+            mock_config_instance.get_all.return_value = {
+                "schema_version": "1.0",
+                "aws": {
+                    "region": "ap-northeast-1",
+                    "s3_bucket": "test-bucket",
+                    "role_arn": "arn:aws:iam::123456789012:role/test",
+                },
+                "conversion": {
+                    "quality_preset": "balanced",
+                    "max_concurrent": 5,
+                    "staging_folder": "/tmp/staging",
+                    "download_timeout": 300,
+                },
+            }
+            mock_config.return_value = mock_config_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["config"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["config"])
 
-        assert result.exit_code == 0
-        assert "Current Configuration" in result.output
-        assert "aws.region" in result.output
+            assert result.exit_code == 0
+            assert "Current Configuration" in result.output
+            assert "aws.region" in result.output
 
-    @patch("vco.cli.main.ConfigManager")
-    def test_config_show_json(self, mock_config):
+    def test_config_show_json(self):
         """Test config show with JSON output."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config_instance.get_all.return_value = {
-            "schema_version": "1.0",
-            "aws": {"region": "ap-northeast-1"},
-            "conversion": {"quality_preset": "balanced"},
-        }
-        mock_config.return_value = mock_config_instance
+        with patch("vco.cli.main.ConfigManager") as mock_config:
+            mock_config_instance = MagicMock()
+            mock_config_instance.get_all.return_value = {
+                "schema_version": "1.0",
+                "aws": {"region": "ap-northeast-1"},
+                "conversion": {"quality_preset": "balanced"},
+            }
+            mock_config.return_value = mock_config_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["config", "--json"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["config", "--json"])
 
-        assert result.exit_code == 0
-        output_data = json.loads(result.output)
-        assert "aws" in output_data
+            assert result.exit_code == 0
+            output_data = json.loads(result.output)
+            assert "aws" in output_data
 
-    @patch("vco.cli.main.ConfigManager")
-    def test_config_set(self, mock_config):
+    def test_config_set(self):
         """Test config set command."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config.return_value = mock_config_instance
+        with patch("vco.cli.main.ConfigManager") as mock_config:
+            mock_config_instance = MagicMock()
+            mock_config.return_value = mock_config_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["config", "set", "aws.region", "us-west-2"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["config", "set", "aws.region", "us-west-2"])
 
-        assert result.exit_code == 0
-        assert "Set aws.region" in result.output
-        mock_config_instance.set.assert_called_once_with("aws.region", "us-west-2")
+            assert result.exit_code == 0
+            assert "Set aws.region" in result.output
+            mock_config_instance.set.assert_called_once_with("aws.region", "us-west-2")
 
-    @patch("vco.cli.main.ConfigManager")
-    def test_config_set_boolean_true(self, mock_config):
+    def test_config_set_boolean_true(self):
         """Test config set with boolean true value."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config.return_value = mock_config_instance
+        with patch("vco.cli.main.ConfigManager") as mock_config:
+            mock_config_instance = MagicMock()
+            mock_config.return_value = mock_config_instance
 
-        runner = CliRunner()
-        runner.invoke(cli, ["config", "set", "some.key", "true"])
+            runner = CliRunner()
+            runner.invoke(cli, ["config", "set", "some.key", "true"])
 
-        # Should convert 'true' to True
-        mock_config_instance.set.assert_called_once_with("some.key", True)
+            # Should convert 'true' to True
+            mock_config_instance.set.assert_called_once_with("some.key", True)
 
-    @patch("vco.cli.main.ConfigManager")
-    def test_config_set_integer(self, mock_config):
+    def test_config_set_integer(self):
         """Test config set with integer value."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config.return_value = mock_config_instance
+        with patch("vco.cli.main.ConfigManager") as mock_config:
+            mock_config_instance = MagicMock()
+            mock_config.return_value = mock_config_instance
 
-        runner = CliRunner()
-        runner.invoke(cli, ["config", "set", "conversion.max_concurrent", "8"])
+            runner = CliRunner()
+            runner.invoke(cli, ["config", "set", "conversion.max_concurrent", "8"])
 
-        # Should convert '8' to 8
-        mock_config_instance.set.assert_called_once_with("conversion.max_concurrent", 8)
+            # Should convert '8' to 8
+            mock_config_instance.set.assert_called_once_with("conversion.max_concurrent", 8)
 
-    @patch("vco.cli.main.ConfigManager")
-    def test_config_set_invalid_value(self, mock_config):
+    def test_config_set_invalid_value(self):
         """Test config set with invalid value."""
         from vco.cli.main import cli
 
-        mock_config_instance = MagicMock()
-        mock_config_instance.set.side_effect = ValueError("Invalid value")
-        mock_config.return_value = mock_config_instance
+        with patch("vco.cli.main.ConfigManager") as mock_config:
+            mock_config_instance = MagicMock()
+            mock_config_instance.set.side_effect = ValueError("Invalid value")
+            mock_config.return_value = mock_config_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["config", "set", "conversion.quality_preset", "invalid"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["config", "set", "conversion.quality_preset", "invalid"])
 
-        assert result.exit_code == 1
-        assert "Error" in result.output
+            assert result.exit_code == 1
+            assert "Error" in result.output
 
 
 class TestConvertCommand:
     """Tests for convert command."""
 
-    @patch("vco.cli.main.ScanService")
-    @patch("vco.cli.main.ConfigManager")
-    def test_convert_no_candidates(self, mock_config, mock_scan):
+    def test_convert_no_candidates(self):
         """Test convert command with no candidates."""
         from vco.cli.main import cli
 
-        mock_config.return_value = MagicMock()
+        with (
+            patch("vco.cli.main.ConfigManager") as mock_config,
+            patch("vco.cli.main.ScanService") as mock_scan,
+        ):
+            mock_config.return_value = MagicMock()
 
-        mock_scan_instance = MagicMock()
-        mock_scan_instance.load_candidates.return_value = None
-        mock_scan.return_value = mock_scan_instance
+            mock_scan_instance = MagicMock()
+            mock_scan_instance.load_candidates.return_value = None
+            mock_scan.return_value = mock_scan_instance
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["convert"])
+            runner = CliRunner()
+            result = runner.invoke(cli, ["convert"])
 
-        assert result.exit_code == 1
-        assert "No candidates found" in result.output
+            assert result.exit_code == 1
+            assert "No candidates found" in result.output
 
-    @patch("vco.cli.main.ScanService")
-    @patch("vco.cli.main.ConfigManager")
-    def test_convert_dry_run(self, mock_config, mock_scan):
+    def test_convert_dry_run(self):
         """Test convert command with dry-run flag."""
         from vco.cli.main import cli
 
-        mock_config.return_value = MagicMock()
+        with (
+            patch("vco.cli.main.ConfigManager") as mock_config,
+            patch("vco.cli.main.ScanService") as mock_scan,
+        ):
+            mock_config.return_value = MagicMock()
 
-        # Create mock candidate
-        mock_video = MagicMock()
-        mock_video.filename = "test.mp4"
-        mock_video.file_size = 1000000
-        mock_video.is_local = True  # Required for candidate classification
+            # Create mock candidate
+            mock_video = MagicMock()
+            mock_video.filename = "test.mp4"
+            mock_video.file_size = 1000000
+            mock_video.is_local = True  # Required for candidate classification
 
-        mock_candidate = MagicMock()
-        mock_candidate.video = mock_video
-        mock_candidate.estimated_savings_bytes = 500000
+            mock_candidate = MagicMock()
+            mock_candidate.video = mock_video
+            mock_candidate.estimated_savings_bytes = 500000
 
-        mock_result = MagicMock()
-        mock_result.candidates = [mock_candidate]
+            mock_result = MagicMock()
+            mock_result.candidates = [mock_candidate]
 
-        mock_scan_instance = MagicMock()
-        mock_scan_instance.load_candidates.return_value = mock_result
-        mock_scan.return_value = mock_scan_instance
+            mock_scan_instance = MagicMock()
+            mock_scan_instance.load_candidates.return_value = mock_result
+            mock_scan.return_value = mock_scan_instance
 
-        runner = CliRunner()
-        # Use --yes to skip confirmation prompt
-        result = runner.invoke(cli, ["convert", "--dry-run", "--yes"])
+            runner = CliRunner()
+            # Use --yes to skip confirmation prompt
+            result = runner.invoke(cli, ["convert", "--dry-run", "--yes"])
 
-        assert result.exit_code == 0
-        assert "Dry run mode" in result.output
-        assert "Would Convert" in result.output
+            assert result.exit_code == 0
+            assert "Dry run mode" in result.output
+            assert "Would Convert" in result.output
