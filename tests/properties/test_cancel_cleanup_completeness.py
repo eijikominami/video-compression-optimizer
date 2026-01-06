@@ -14,7 +14,8 @@ from vco.services.async_cancel import CancelResult
 
 # Test data based on requirements
 # Source: Requirements 3.1-3.5 - cancellation behavior
-CANCELLABLE_STATUSES = ["PENDING", "UPLOADING", "CONVERTING", "VERIFYING"]
+# Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
+CANCELLABLE_STATUSES = ["PENDING", "UPLOADING", "CONVERTING"]
 NON_CANCELLABLE_STATUSES = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"]
 ALL_STATUSES = CANCELLABLE_STATUSES + NON_CANCELLABLE_STATUSES
 
@@ -206,7 +207,8 @@ class TestCleanupCompleteness:
         Requirement 3.5: Temporary S3 objects are cleaned up.
         """
         # Tasks that have started uploading should have S3 cleanup
-        has_s3_files = previous_status in ["UPLOADING", "CONVERTING", "VERIFYING"]
+        # Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
+        has_s3_files = previous_status in ["UPLOADING", "CONVERTING"]
 
         result = CancelResult(
             task_id="test-task-id",
@@ -217,7 +219,7 @@ class TestCleanupCompleteness:
             mediaconvert_cancelled=previous_status == "CONVERTING",
         )
 
-        if previous_status in ["UPLOADING", "CONVERTING", "VERIFYING"]:
+        if previous_status in ["UPLOADING", "CONVERTING"]:
             # Should attempt S3 cleanup
             assert result.s3_files_deleted is True
 

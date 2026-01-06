@@ -214,7 +214,6 @@ class TestCancelAllStates:
             ("PENDING", True),
             ("UPLOADING", True),
             ("CONVERTING", True),
-            ("VERIFYING", True),
             ("COMPLETED", False),
             ("PARTIALLY_COMPLETED", False),
             ("FAILED", False),

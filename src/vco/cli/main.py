@@ -1661,11 +1661,11 @@ cancel.help = get_help("cancel.description")
 
 def _format_status(status: str) -> str:
     """Format status with color."""
+    # Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
     status_colors = {
         "PENDING": "[yellow]PENDING[/yellow]",
         "UPLOADING": "[blue]UPLOADING[/blue]",
         "CONVERTING": "[blue]CONVERTING[/blue]",
-        "VERIFYING": "[blue]VERIFYING[/blue]",
         "COMPLETED": "[green]COMPLETED[/green]",
         "PARTIALLY_COMPLETED": "[yellow]PARTIALLY_COMPLETED[/yellow]",
         "FAILED": "[red]FAILED[/red]",

@@ -330,9 +330,7 @@ class TestLambdaHandler:
         assert "job-123" in body["cancelled_jobs"]
         assert body["deleted_files"] == 5
 
-    @pytest.mark.parametrize(
-        "status", ["PENDING", "UPLOADING", "PROCESSING", "CONVERTING", "VERIFYING"]
-    )
+    @pytest.mark.parametrize("status", ["PENDING", "UPLOADING", "PROCESSING", "CONVERTING"])
     @patch.object(cancel_app, "update_task_cancelled")
     @patch.object(cancel_app, "cleanup_s3_files")
     @patch.object(cancel_app, "cancel_mediaconvert_jobs")

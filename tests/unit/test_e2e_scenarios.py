@@ -103,11 +103,11 @@ class TestNormalFlowScenario:
 
     def test_normal_flow_state_transitions(self):
         """Test valid state transitions in normal flow."""
+        # Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
         valid_transitions = [
             ("PENDING", "UPLOADING"),
             ("UPLOADING", "CONVERTING"),
-            ("CONVERTING", "VERIFYING"),
-            ("VERIFYING", "COMPLETED"),
+            ("CONVERTING", "COMPLETED"),
         ]
 
         current_state = "PENDING"

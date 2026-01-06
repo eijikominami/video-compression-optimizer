@@ -248,7 +248,6 @@ class TestStatusDisplay:
             "PENDING",
             "UPLOADING",
             "CONVERTING",
-            "VERIFYING",
             "COMPLETED",
             "PARTIALLY_COMPLETED",
             "FAILED",

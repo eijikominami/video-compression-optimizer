@@ -130,9 +130,7 @@ def async_task_strategy(draw):
         error_message=draw(st.one_of(st.none(), st.text(min_size=1, max_size=500))),
         ttl=draw(st.one_of(st.none(), st.integers(min_value=1700000000, max_value=2000000000))),
         progress_percentage=draw(st.integers(min_value=0, max_value=100)),
-        current_step=draw(
-            st.one_of(st.none(), st.sampled_from(["uploading", "converting", "verifying"]))
-        ),
+        current_step=draw(st.one_of(st.none(), st.sampled_from(["uploading", "converting"]))),
         estimated_completion_time=draw(st.one_of(st.none(), datetime_strategy)),
         max_concurrent=draw(st.integers(min_value=1, max_value=10)),
     )
