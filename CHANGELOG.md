@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **並列転送機能**
+  - `vco convert --parallel N` オプションで同時転送数を設定（デフォルト: 3、範囲: 1-10）
+  - iCloud ダウンロードと S3 アップロードを並列実行
+  - Rich Progress による全体進捗表示（"Downloading 3/10 files"）
+  - Ctrl+C による転送のグレースフルキャンセル
+  - 一部失敗時も残りの転送を継続
+
 ## [0.2.0] - 2026-01-09
 
 ### Changed

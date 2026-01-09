@@ -213,6 +213,13 @@ scan.help = get_help("scan.description")
 @click.option("--dry-run", is_flag=True, help=get_help("convert.dry_run"))
 @click.option("--skip-icloud", is_flag=True, help=get_help("convert.skip_icloud"))
 @click.option("--download-timeout", type=int, help=get_help("convert.download_timeout"))
+@click.option(
+    "--parallel",
+    "-p",
+    type=int,
+    default=3,
+    help="Number of concurrent transfers (1-10, default: 3)",
+)
 @click.option("--yes", "-y", is_flag=True, help=get_help("convert.yes"))
 @click.pass_context
 def convert(
@@ -222,6 +229,7 @@ def convert(
     dry_run: bool,
     skip_icloud: bool,
     download_timeout: int | None,
+    parallel: int,
     yes: bool,
 ):
     """Convert candidate videos to H.265."""
@@ -297,8 +305,8 @@ def convert(
 
     # Download iCloud videos (skip_confirm=True since we already confirmed)
     if icloud_candidates and not skip_icloud:
-        downloaded_candidates = _download_icloud_videos(
-            icloud_candidates, timeout, skip_confirm=True
+        downloaded_candidates = _download_icloud_videos_parallel(
+            icloud_candidates, timeout, parallel, skip_confirm=True
         )
 
     # Combine local and downloaded candidates
@@ -342,7 +350,7 @@ def convert(
         sys.exit(1)
 
     # Execute async conversion (skip_confirm=True since we already confirmed)
-    _convert_async(ctx, final_candidates, quality, aws_config, skip_confirm=True)
+    _convert_async_parallel(ctx, final_candidates, quality, aws_config, parallel, skip_confirm=True)
 
 
 # Override convert help text dynamically based on locale
@@ -1314,6 +1322,315 @@ def _download_icloud_videos(candidates, timeout: int, skip_confirm: bool) -> lis
     console.print()
 
     return downloaded_candidates
+
+
+def _download_icloud_videos_parallel(
+    candidates, timeout: int, concurrency_limit: int, skip_confirm: bool
+) -> list:
+    """Download iCloud videos in parallel before conversion.
+
+    Args:
+        candidates: List of ConversionCandidate with iCloud videos
+        timeout: Download timeout in seconds
+        concurrency_limit: Maximum concurrent downloads (1-10)
+        skip_confirm: Skip confirmation prompt
+
+    Returns:
+        List of candidates that were successfully downloaded
+    """
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+    )
+
+    from vco.photos.swift_bridge import SwiftBridge
+    from vco.services.icloud_download import ICloudDownloadService
+    from vco.services.parallel_transfer import ParallelTransferService
+
+    # Calculate total download size
+    total_size = sum(c.video.file_size for c in candidates)
+
+    # Initialize SwiftBridge
+    try:
+        swift_bridge = SwiftBridge()
+    except Exception as e:
+        console.print(f"[red]Error: Swift bridge unavailable: {e}[/red]")
+        return []
+
+    # Initialize download service (without progress callback - we'll handle it ourselves)
+    download_service = ICloudDownloadService(
+        swift_bridge=swift_bridge,
+        timeout=timeout,
+    )
+
+    # Check disk space
+    has_space, available = download_service.check_disk_space(total_size)
+    if not has_space:
+        console.print()
+        console.print("[red]Error: Insufficient disk space for iCloud downloads.[/red]")
+        console.print(f"  Required: {format_size(total_size * 1.1)}")
+        console.print(f"  Available: {format_size(available)}")
+        return []
+
+    # Show confirmation prompt
+    console.print()
+    console.print(f"[bold]iCloud videos to download: {len(candidates)}[/bold]")
+    console.print(f"  Estimated size: {format_size(total_size)}")
+    console.print(f"  Timeout: {timeout}s per video")
+    console.print(f"  Parallel downloads: {min(max(concurrency_limit, 1), 10)}")
+    console.print()
+
+    if not skip_confirm:
+        if not click.confirm("Download iCloud videos before conversion?"):
+            console.print("[yellow]Skipping iCloud videos.[/yellow]")
+            return []
+
+    # Download with progress display
+    console.print()
+
+    from rich.progress import (
+        DownloadColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    )
+
+    # Create download functions for each candidate
+    candidate_map: dict[str, Any] = {}  # item_id -> candidate
+    download_tasks: dict[str, Any] = {}  # filename -> task_id
+
+    def create_download_func(candidate):
+        """Create a download function for a candidate with progress tracking."""
+        from vco.services.icloud_download import DownloadProgress
+
+        video = candidate.video
+        filename = video.filename
+
+        def download():
+            # Add task when download starts
+            if filename not in download_tasks:
+                task_id = progress.add_task(f"Downloading {filename}", total=video.file_size)
+                download_tasks[filename] = task_id
+
+            # Create progress callback for this specific download
+            def progress_callback(dp: DownloadProgress) -> None:
+                task_id = download_tasks.get(filename)
+                if task_id is not None:
+                    progress.update(task_id, completed=dp.downloaded_bytes)
+
+            # Set progress callback for this download
+            download_service.progress_callback = progress_callback
+
+            result = download_service.download_video(video)
+
+            # Hide progress bar on completion
+            task_id = download_tasks.get(filename)
+            if task_id is not None:
+                progress.update(task_id, visible=False)
+
+            if result.success and result.local_path:
+                # Update video path and is_local flag
+                video.path = result.local_path
+                video.is_local = True
+                return result.local_path
+            return None
+
+        return download
+
+    items = []
+    for candidate in candidates:
+        video = candidate.video
+        item_id = video.uuid
+        candidate_map[item_id] = candidate
+        items.append((item_id, video.filename, create_download_func(candidate)))
+
+    # Execute parallel downloads
+    parallel_service = ParallelTransferService(
+        concurrency_limit=concurrency_limit,
+    )
+
+    # Set up Ctrl+C handler
+    import signal
+
+    original_handler = signal.getsignal(signal.SIGINT)
+    cancelled = False
+
+    def handle_sigint(signum, frame):
+        nonlocal cancelled
+        cancelled = True
+        console.print("\n[yellow]Cancelling downloads...[/yellow]")
+        parallel_service.cancel()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    try:
+        with progress:
+            summary = parallel_service.download_parallel(items)
+    finally:
+        # Restore original signal handler
+        signal.signal(signal.SIGINT, original_handler)
+
+    if cancelled:
+        console.print("[yellow]Download cancelled by user.[/yellow]")
+        console.print()
+
+    # Collect successful downloads
+    downloaded_candidates: list[Any] = []
+    failed_downloads: list[tuple[str, str | None]] = []
+
+    for result in summary.results:
+        candidate = candidate_map.get(result.item_id)
+        if candidate:
+            if result.success:
+                console.print(
+                    f"  [green]✓[/green] {result.filename} ({result.transfer_time_seconds:.1f}s)"
+                )
+                downloaded_candidates.append(candidate)
+            else:
+                console.print(f"  [red]✗[/red] {result.filename}: {result.error_message}")
+                failed_downloads.append((result.filename, result.error_message))
+
+    # Show summary
+    console.print()
+    console.print("[bold]Download Summary[/bold]")
+    console.print(f"  Successful: [green]{summary.successful}[/green]")
+    console.print(f"  Failed: [red]{summary.failed}[/red]")
+    console.print(f"  Total time: {summary.total_time_seconds:.1f}s")
+
+    if failed_downloads:
+        console.print()
+        console.print("[red]Failed downloads:[/red]")
+        for filename, error in failed_downloads[:5]:
+            console.print(f"  - {filename}: {error}")
+        if len(failed_downloads) > 5:
+            console.print(f"  ... and {len(failed_downloads) - 5} more")
+
+    console.print()
+
+    return downloaded_candidates
+
+
+def _convert_async_parallel(
+    ctx, candidates, quality: str, aws_config, concurrency_limit: int, skip_confirm: bool = False
+):
+    """Handle async conversion mode with parallel uploads."""
+    import time
+
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        SpinnerColumn,
+        TaskID,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    from vco.services.async_convert import AsyncConvertCommand
+
+    # Get API URL from config or use default
+    api_url = getattr(aws_config, "async_api_url", None)
+    if not api_url:
+        # Use default API URL based on region
+        api_url = f"https://dln48ri1di.execute-api.{aws_config.region}.amazonaws.com/dev"
+
+    console.print()
+    console.print("[bold]Async conversion mode[/bold]")
+    console.print(f"API URL: {api_url}")
+    console.print(f"Parallel uploads: {min(max(concurrency_limit, 1), 10)}")
+
+    try:
+        async_cmd = AsyncConvertCommand(
+            api_url=api_url,
+            s3_bucket=aws_config.s3_bucket,
+            region=aws_config.region,
+            profile_name=aws_config.profile or None,
+        )
+
+        console.print("[bold]Uploading files to S3...[/bold]")
+
+        # Use Rich Progress for upload progress display (same style as iCloud download)
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        )
+
+        # Track upload tasks and timing
+        upload_tasks: dict[str, TaskID] = {}  # filename -> task_id
+        upload_start_times: dict[str, float] = {}  # filename -> start_time
+        completed_uploads: list[tuple[str, float]] = []  # (filename, duration)
+
+        def file_progress_callback(filename: str, uploaded_bytes: int, total_bytes: int) -> None:
+            """Display upload progress for each file using rich Progress."""
+            if filename not in upload_tasks:
+                task_id = progress.add_task(f"Uploading {filename}", total=total_bytes)
+                upload_tasks[filename] = task_id
+                upload_start_times[filename] = time.time()
+            progress.update(upload_tasks[filename], completed=uploaded_bytes)
+
+            # Hide progress bar when upload is complete
+            if uploaded_bytes >= total_bytes:
+                progress.update(upload_tasks[filename], visible=False)
+                duration = time.time() - upload_start_times.get(filename, time.time())
+                completed_uploads.append((filename, duration))
+
+        # Execute parallel upload using AsyncConvertCommand's parallel method
+        upload_start = time.time()
+        with progress:
+            result = async_cmd.execute_parallel(
+                candidates=candidates,
+                quality_preset=quality,
+                concurrency_limit=concurrency_limit,
+                file_progress_callback=file_progress_callback,
+            )
+        upload_total_time = time.time() - upload_start
+
+        # Show completion status for each file
+        for filename, duration in completed_uploads:
+            console.print(f"  [green]✓[/green] {filename} ({duration:.1f}s)")
+
+        # Show upload summary
+        successful_count = len(completed_uploads)
+        failed_count = len(candidates) - successful_count
+        console.print()
+        console.print("[bold]Upload Summary[/bold]")
+        console.print(f"  Successful: [green]{successful_count}[/green]")
+        console.print(f"  Failed: [red]{failed_count}[/red]")
+        console.print(f"  Total time: {upload_total_time:.1f}s")
+
+        if result.status == "ERROR":
+            console.print()
+            console.print(f"[red]✗ Failed: {result.error_message}[/red]")
+            sys.exit(1)
+
+        console.print()
+        console.print("[green]✓ Task submitted successfully[/green]")
+        console.print(f"  Task ID: [cyan]{result.task_id}[/cyan]")
+        console.print(f"  Files: {result.file_count}")
+        console.print()
+        console.print("[dim]Use 'vco status' to check progress[/dim]")
+        console.print(f"[dim]Use 'vco status {result.task_id}' for details[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]✗ Failed to submit task: {e}[/red]")
+        sys.exit(1)
 
 
 def _convert_async(ctx, candidates, quality: str, aws_config, skip_confirm: bool = False):

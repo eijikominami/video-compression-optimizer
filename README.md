@@ -133,11 +133,16 @@ vco convert --skip-icloud
 # Set download timeout for iCloud videos (default: 300 seconds, range: 30-3600)
 vco convert --download-timeout 600
 
+# Set parallel transfer concurrency (default: 3, range: 1-10)
+vco convert --parallel 5
+
 # Skip confirmation prompts
 vco convert --yes
 ```
 
 **Automatic iCloud Download**: When running `vco convert`, iCloud-only videos are automatically downloaded using Swift PhotoKit. Use `--skip-icloud` to skip them.
+
+**Parallel Transfers**: Downloads and uploads run in parallel (default: 3 concurrent). Use `--parallel N` to adjust. Press Ctrl+C to cancel gracefully.
 
 Conversions are processed asynchronously via AWS Step Functions. After submitting a conversion, you can check status and manage tasks:
 

@@ -466,3 +466,225 @@ class AsyncConvertCommand:
                     total_bytes=total_bytes,
                 )
             )
+
+    def execute_parallel(
+        self,
+        candidates: list[ConversionCandidate],
+        quality_preset: str = "balanced",
+        user_id: str | None = None,
+        concurrency_limit: int = 3,
+        progress_callback: Callable[[str, int, int, int], None] | None = None,
+        file_progress_callback: Callable[[str, int, int], None] | None = None,
+    ) -> AsyncTaskResult:
+        """Submit async conversion task with parallel uploads.
+
+        1. Generate task ID
+        2. Upload source files to S3 in parallel
+        3. Submit task to API Gateway
+        4. Return task ID for tracking
+
+        Args:
+            candidates: List of conversion candidates
+            quality_preset: Quality preset for conversion
+            user_id: User identifier (defaults to machine ID)
+            concurrency_limit: Maximum concurrent uploads (1-10)
+            progress_callback: Callback for overall progress (filename, percent, current, total)
+            file_progress_callback: Callback for per-file byte progress (filename, uploaded_bytes, total_bytes)
+
+        Returns:
+            AsyncTaskResult with task ID and status
+        """
+        from vco.services.parallel_transfer import ParallelTransferService
+
+        if not candidates:
+            return AsyncTaskResult(
+                task_id="",
+                status="ERROR",
+                file_count=0,
+                message="No candidates provided",
+                error_message="No candidates provided",
+            )
+
+        # Generate task ID
+        task_id = str(uuid.uuid4())
+
+        # Use machine ID as user_id if not provided
+        if user_id is None:
+            user_id = self._get_machine_id()
+
+        logger.info(
+            f"Submitting async task {task_id} with {len(candidates)} files (parallel={concurrency_limit})"
+        )
+
+        # Filter local candidates only
+        local_candidates = []
+        skipped_candidates = []
+
+        for candidate in candidates:
+            video = candidate.video
+            if self._check_file_available(video.path):
+                local_candidates.append(candidate)
+            else:
+                skipped_candidates.append(candidate)
+                logger.warning(f"Skipping iCloud-only file: {video.filename}")
+
+        if not local_candidates:
+            return AsyncTaskResult(
+                task_id=task_id,
+                status="ERROR",
+                file_count=0,
+                message="No local files available for upload",
+                error_message="All files are in iCloud only. Download them in Photos app first.",
+            )
+
+        # Prepare upload items
+        files_data: list[dict] = []
+        upload_items: list[tuple[str, str, Callable[[], bool]]] = []
+        candidate_file_map: dict[str, tuple[ConversionCandidate, str, str, str]] = {}
+
+        for candidate in local_candidates:
+            video = candidate.video
+            file_id = str(uuid.uuid4())
+
+            source_s3_key = f"async/{task_id}/input/{file_id}/{video.filename}"
+            metadata_s3_key = f"async/{task_id}/input/{file_id}/metadata.json"
+
+            # Store mapping for later
+            candidate_file_map[file_id] = (candidate, file_id, source_s3_key, metadata_s3_key)
+
+            def create_upload_func(
+                cand: ConversionCandidate,
+                fid: str,
+                src_key: str,
+                meta_key: str,
+            ) -> Callable[[], bool]:
+                """Create upload function for a candidate."""
+
+                def upload() -> bool:
+                    vid = cand.video
+                    try:
+                        # Track cumulative bytes for progress callback
+                        bytes_uploaded = 0
+
+                        def s3_progress_callback(bytes_amount: int) -> None:
+                            nonlocal bytes_uploaded
+                            bytes_uploaded += bytes_amount
+                            if file_progress_callback:
+                                file_progress_callback(vid.filename, bytes_uploaded, vid.file_size)
+
+                        # Upload source file with progress callback
+                        self.s3_client.upload_file(
+                            str(vid.path),
+                            self.s3_bucket,
+                            src_key,
+                            Callback=s3_progress_callback if file_progress_callback else None,
+                        )
+
+                        # Extract and upload metadata
+                        metadata = self._extract_metadata(vid)
+                        self._upload_metadata(metadata, meta_key)
+
+                        logger.info(f"Uploaded {vid.filename} to s3://{self.s3_bucket}/{src_key}")
+                        return True
+                    except Exception as e:
+                        logger.error(f"Failed to upload {vid.filename}: {e}")
+                        return False
+
+                return upload
+
+            upload_items.append(
+                (
+                    file_id,
+                    video.filename,
+                    create_upload_func(candidate, file_id, source_s3_key, metadata_s3_key),
+                )
+            )
+
+        # Execute parallel uploads
+        parallel_service = ParallelTransferService(
+            concurrency_limit=concurrency_limit,
+            progress_callback=progress_callback,
+        )
+
+        try:
+            summary = parallel_service.upload_parallel(upload_items)
+
+            # Collect successful uploads
+            for result in summary.results:
+                if result.success:
+                    mapping = candidate_file_map.get(result.item_id)
+                    if mapping:
+                        candidate, file_id, source_s3_key, metadata_s3_key = mapping
+                        video = candidate.video
+                        files_data.append(
+                            {
+                                "file_id": file_id,
+                                "original_uuid": video.uuid,
+                                "filename": video.filename,
+                                "source_s3_key": source_s3_key,
+                                "metadata_s3_key": metadata_s3_key,
+                                "source_size_bytes": video.file_size,
+                            }
+                        )
+
+            if not files_data:
+                logger.error(f"All uploads failed for task {task_id}")
+                self._cleanup_task_files(task_id)
+                return AsyncTaskResult(
+                    task_id=task_id,
+                    status="ERROR",
+                    file_count=0,
+                    message="All uploads failed",
+                    error_message="Failed to upload any files to S3",
+                )
+
+            logger.info(
+                f"Parallel upload complete: {summary.successful}/{summary.total} successful "
+                f"in {summary.total_time_seconds:.1f}s"
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to upload files for task {task_id}")
+            self._cleanup_task_files(task_id)
+            return AsyncTaskResult(
+                task_id=task_id,
+                status="ERROR",
+                file_count=0,
+                message="Failed to upload files",
+                error_message=str(e),
+            )
+
+        # Submit task to API Gateway
+        try:
+            self._submit_task(
+                task_id=task_id,
+                user_id=user_id,
+                quality_preset=quality_preset,
+                files=files_data,
+            )
+
+            failed_count = len(local_candidates) - len(files_data)
+            message = f"Task submitted successfully. {len(files_data)} files uploaded"
+            if failed_count > 0:
+                message += f", {failed_count} uploads failed"
+            if skipped_candidates:
+                message += f", {len(skipped_candidates)} files skipped (iCloud only)"
+
+            return AsyncTaskResult(
+                task_id=task_id,
+                status="PENDING",
+                file_count=len(files_data),
+                message=message,
+                api_url=self.api_url,
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to submit task {task_id}")
+            self._cleanup_task_files(task_id)
+            return AsyncTaskResult(
+                task_id=task_id,
+                status="ERROR",
+                file_count=0,
+                message="Failed to submit task",
+                error_message=str(e),
+            )
