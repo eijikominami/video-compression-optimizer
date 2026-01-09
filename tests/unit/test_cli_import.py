@@ -147,9 +147,7 @@ class TestImportOriginalDeletion:
 
     @patch("vco.services.unified_import.UnifiedImportService")
     @patch("vco.services.aws_import.AwsImportService")
-    def test_y_flag_shows_delete_prompt(
-        self, mock_aws_service_class, mock_unified_service_class
-    ):
+    def test_y_flag_shows_delete_prompt(self, mock_aws_service_class, mock_unified_service_class):
         """AC 5.10: With -y flag but without --delete-original, delete prompt still shown.
 
         The -y flag skips the initial proceed confirmation, but delete prompt
