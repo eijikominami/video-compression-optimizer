@@ -118,9 +118,7 @@ def async_task_strategy(draw):
         ttl=draw(st.one_of(st.none(), st.integers(min_value=0))),
         progress_percentage=draw(st.integers(min_value=0, max_value=100)),
         current_step=draw(
-            st.one_of(
-                st.none(), st.sampled_from(["pending", "converting", "verifying", "completed"])
-            )
+            st.one_of(st.none(), st.sampled_from(["pending", "converting", "completed"]))
         ),
         estimated_completion_time=draw(st.one_of(st.none(), st.just(now))),
         max_concurrent=draw(st.integers(min_value=1, max_value=20)),

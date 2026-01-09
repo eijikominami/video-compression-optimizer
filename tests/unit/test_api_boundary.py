@@ -435,7 +435,7 @@ class TestCliApiGatewayInterface:
                 {
                     "file_id": "file-2",
                     "filename": "video2.mov",
-                    "status": "VERIFYING",
+                    "status": "PENDING",
                 },
                 {
                     "file_id": "file-3",
@@ -468,15 +468,13 @@ class TestCliApiGatewayInterface:
     def test_file_progress_matches_status(self):
         """Test that file progress percentage matches expected values for each status.
 
-        Progress mapping:
+        Progress mapping (simplified):
         - PENDING: 0%
-        - CONVERTING: 0-30% (scaled from MediaConvert)
-        - VERIFYING: 65%
+        - CONVERTING: 0-99% (from MediaConvert)
         - COMPLETED/FAILED: 100%
         """
         test_cases = [
             ("PENDING", 0, 0),
-            ("VERIFYING", 65, 65),
             ("COMPLETED", 100, 100),
             ("FAILED", 100, 100),
         ]

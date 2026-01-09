@@ -159,9 +159,6 @@ def scan(
     console.print(f"  Already optimized: {summary.already_optimized}")
     console.print(f"  Professional format: {summary.professional}")
     console.print(f"  Skipped: {summary.skipped}")
-    console.print(
-        f"  Estimated savings: {format_size(summary.estimated_total_savings_bytes)} ({summary.estimated_total_savings_percent:.1f}%)"
-    )
     console.print()
 
     if not result.candidates:
@@ -176,16 +173,12 @@ def scan(
     table.add_column("Duration")
     table.add_column("Size")
     table.add_column("Location", style="magenta")
-    table.add_column("Est. Savings", style="green")
 
     for candidate in result.candidates[:20]:  # Show first 20
         video = candidate.video
 
         # Determine location status
-        if video.is_local:
-            location = "Local"
-        else:
-            location = "iCloud"
+        location = "Local" if video.is_local else "iCloud"
 
         table.add_row(
             video.filename[:40] + ("..." if len(video.filename) > 40 else ""),
@@ -194,32 +187,12 @@ def scan(
             format_duration(video.duration),
             format_size(video.file_size),
             location,
-            f"{format_size(candidate.estimated_savings_bytes)} ({candidate.estimated_savings_percent:.0f}%)",
         )
 
     console.print(table)
 
     if len(result.candidates) > 20:
         console.print(f"[dim]... and {len(result.candidates) - 20} more candidates[/dim]")
-
-    # Show iCloud-only videos
-    icloud_only = [c for c in result.candidates if not c.video.is_local]
-    if icloud_only:
-        console.print()
-        console.print(
-            f"[yellow]⚠ {len(icloud_only)} videos are in iCloud only and need to be downloaded first.[/yellow]"
-        )
-        console.print(
-            "[dim]Open Photos app and download these videos, then run 'vco scan' again:[/dim]"
-        )
-        console.print()
-
-        for candidate in icloud_only[:10]:  # Show first 10 iCloud-only
-            video = candidate.video
-            console.print(f"  - {video.filename}")
-
-        if len(icloud_only) > 10:
-            console.print(f"[dim]  ... and {len(icloud_only) - 10} more iCloud-only videos[/dim]")
 
     console.print()
     console.print(f"[dim]Candidates saved to: {scan_service.output_dir / 'candidates.json'}[/dim]")
@@ -553,43 +526,36 @@ def import_cmd(
         console.print()
 
         table = Table(title="Pending Imports")
-        table.add_column("Source", style="dim")
         table.add_column("ID", style="cyan")
         table.add_column("Filename")
         table.add_column("Original")
         table.add_column("Converted")
         table.add_column("Ratio", style="green")
         table.add_column("SSIM")
-        table.add_column("Albums", style="magenta")
+        table.add_column("VMAF")
 
         for item in list_result.all_items:
             # Calculate savings
             savings_ratio = f"{item.compression_ratio:.1f}x" if item.compression_ratio > 0 else "-"
             ssim_str = f"{item.ssim_score:.4f}" if item.ssim_score > 0 else "-"
-            albums_str = ", ".join(item.albums[:2]) if item.albums else "-"
-            if len(item.albums) > 2:
-                albums_str += f" (+{len(item.albums) - 2})"
+            vmaf_str = f"{item.vmaf_score:.1f}" if item.vmaf_score > 0 else "-"
 
             # Truncate filename
             filename = item.converted_filename
             if len(filename) > 25:
                 filename = filename[:22] + "..."
 
-            # Source label
-            source_label = "[blue]AWS[/blue]" if item.source == "aws" else "[green]Local[/green]"
-
             # ID display (full ID for easy copy-paste)
             display_id = item.item_id
 
             table.add_row(
-                source_label,
                 display_id,
                 filename,
                 format_size(item.original_size),
                 format_size(item.converted_size),
                 savings_ratio,
                 ssim_str,
-                albums_str,
+                vmaf_str,
             )
 
         console.print(table)
@@ -844,8 +810,8 @@ def import_cmd(
                     console.print(f"[green]Original videos moved to trash: {deleted_count}[/green]")
                 if failed_count > 0:
                     console.print(f"[yellow]Failed to delete: {failed_count}[/yellow]")
-            elif not yes and successful_results:
-                # No -y flag and no --delete-original: prompt for deletion
+            elif successful_results:
+                # No --delete-original: prompt for deletion (regardless of -y flag)
                 if click.confirm(
                     f"Delete {len(successful_results)} original video(s)?", default=False
                 ):
@@ -871,9 +837,6 @@ def import_cmd(
                     console.print(
                         "[yellow]Note: Original videos remain in Photos library.[/yellow]"
                     )
-            else:
-                # -y flag without --delete-original: no deletion, show reminder
-                console.print("[yellow]Note: Original videos remain in Photos library.[/yellow]")
 
         return
 
@@ -1002,8 +965,8 @@ def import_cmd(
             )
 
         # Handle original deletion prompt if import succeeded and --delete-original not specified
-        if import_result.success and not delete_original and not yes:
-            # Prompt for original deletion
+        if import_result.success and not delete_original:
+            # Prompt for original deletion (regardless of -y flag)
             if click.confirm("Delete original video?", default=False):
                 # User responded "y" - attempt deletion
                 # Get original UUID from import result
@@ -1027,9 +990,6 @@ def import_cmd(
             else:
                 # User responded "n" - show reminder
                 console.print("[yellow]Note: Original video remains in Photos library.[/yellow]")
-        elif import_result.success and not delete_original:
-            # -y flag without --delete-original: no deletion, show reminder
-            console.print("[yellow]Note: Original video remains in Photos library.[/yellow]")
     else:
         # Non-AWS item ID format - not supported
         console.print(f"[red]Error: Invalid item ID format: {item_id}[/red]")
@@ -1497,6 +1457,7 @@ def status(ctx, status_filter: str | None, limit: int, output_json: bool, task_i
                                     "status": f.status,
                                     "progress_percentage": f.progress_percentage,
                                     "ssim_score": f.ssim_score,
+                                    "vmaf_score": f.vmaf_score,
                                     "error_message": f.error_message,
                                 }
                                 for f in task.files
@@ -1528,6 +1489,7 @@ def status(ctx, status_filter: str | None, limit: int, output_json: bool, task_i
             table.add_column("Status")
             table.add_column("Progress")
             table.add_column("SSIM")
+            table.add_column("VMAF")
             table.add_column("Error", style="red")
 
             for f in task.files:
@@ -1536,6 +1498,7 @@ def status(ctx, status_filter: str | None, limit: int, output_json: bool, task_i
                     _format_status(f.status),
                     f"{f.progress_percentage}%",
                     f"{f.ssim_score:.4f}" if f.ssim_score else "-",
+                    f"{f.vmaf_score:.2f}" if f.vmaf_score else "-",
                     f.error_message[:30] if f.error_message else "-",
                 )
 
@@ -1661,11 +1624,11 @@ cancel.help = get_help("cancel.description")
 
 def _format_status(status: str) -> str:
     """Format status with color."""
+    # Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
     status_colors = {
         "PENDING": "[yellow]PENDING[/yellow]",
         "UPLOADING": "[blue]UPLOADING[/blue]",
         "CONVERTING": "[blue]CONVERTING[/blue]",
-        "VERIFYING": "[blue]VERIFYING[/blue]",
         "COMPLETED": "[green]COMPLETED[/green]",
         "PARTIALLY_COMPLETED": "[yellow]PARTIALLY_COMPLETED[/yellow]",
         "FAILED": "[red]FAILED[/red]",

@@ -9,11 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MediaConvert エンコード設定の最適化**
+  - `QualityTuningLevel`: `MULTI_PASS_HQ` に変更（2パスエンコードで最適なビットレート配分）
+  - `DynamicSubGop`: `ADAPTIVE` に変更（コンテンツに基づく動的 B フレーム調整）
+  - `GopBReference`: `ENABLED` に変更（B フレーム参照で圧縮効率向上）
+  - `AdaptiveQuantization`: `AUTO` に変更（自動量子化最適化）
+  - `GopSizeUnits`: `AUTO` に変更（MediaConvert が最適な GOP サイズを自動選択）
+  - 固定値（`GopSize`, `NumberBFramesBetweenReferenceFrames`, `MinIInterval`）を削除し、MediaConvert の自動最適化に委任
+
+- **MediaConvert フレームごとのメトリクス機能への移行**
+  - Quality Checker Lambda を廃止し、MediaConvert の PerFrameMetrics 機能を使用
+  - SSIM に加えて VMAF メトリクスをサポート
+  - ワークフローを簡素化（VERIFYING ステータスを削除）
+  - 品質評価を Async Workflow Lambda 内で実行
+
 - **メタデータ埋め込みを Lambda から CLI に移行**
   - Lambda (quality-checker) でのメタデータ埋め込みを廃止
   - CLI で exiftool を使用して `Keys:CreationDate` タグに書き込み
   - Photos アプリでタイムゾーンが正しく表示されるように修正（9 時間ズレ問題の解決）
   - 新しい依存関係: exiftool (`brew install exiftool`)
+
+### Removed
+
+- **Quality Checker Lambda の廃止**
+  - FFprobe ベースの SSIM 計算を MediaConvert の PerFrameMetrics に置き換え
+  - `sam-app/quality-checker/` ディレクトリを削除
+  - `VERIFYING` ステータスを削除（`FileStatus` enum から削除）
+  - `verification_progress` フィールドを削除（`AsyncFile` から削除）
 
 ### Fixed
 
@@ -27,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MediaConvert 品質メトリクス解析モジュール**
+  - `QualityMetrics` データクラス（SSIM/VMAF の average, min, max を保持）
+  - `QualityMetricsParser` クラス（CSV 解析ロジック）
+  - `QualityEvaluator` クラス（閾値評価ロジック）
+  - デフォルト閾値: SSIM >= 0.95, VMAF >= 70
+  - 環境変数による閾値設定: `SSIM_THRESHOLD`, `VMAF_THRESHOLD`
+
 - **メタデータ検証機能**
   - `vco import` 実行時に変換後動画のメタデータを自動検証
   - 撮影日時の検証（±1 秒許容）
@@ -34,10 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 検証失敗時はインポートをスキップ（`--force` でバイパス可能）
   - 処理時刻近接警告: 撮影日時が処理時刻の ±1 時間以内の場合に警告表示
   - バッチインポート時の検証サマリー表示
-- **VERIFYING 進捗表示の改善**
-  - `verification_progress` フィールドを AsyncFile に追加（0-100）
-  - Quality Checker Lambda が SSIM 計算の進捗を DynamoDB に更新
-  - 進捗更新タイミング: 0%（開始）→ 30%（フレーム抽出完了）→ 100%（SSIM 計算完了）
   - CLI の進捗表示が VERIFYING フェーズで 65-99% の範囲で動的に更新
 - **オリジナル動画削除機能**
   - `vco import --delete-original` オプションでインポート後にオリジナル動画を自動削除

@@ -1,1 +1,2 @@
-boto3>=1.28.0
+# boto3 is provided by Boto3Layer (see template.yaml)
+# Do not add boto3 here - it would override the Layer version

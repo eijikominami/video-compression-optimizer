@@ -24,7 +24,6 @@ VALID_TASK_STATUSES = [
     "PENDING",
     "UPLOADING",
     "CONVERTING",
-    "VERIFYING",
     "COMPLETED",
     "PARTIALLY_COMPLETED",
     "FAILED",
@@ -34,14 +33,13 @@ VALID_TASK_STATUSES = [
 VALID_FILE_STATUSES = [
     "PENDING",
     "CONVERTING",
-    "VERIFYING",
     "COMPLETED",
     "DOWNLOADED",
     "REMOVED",
     "FAILED",
 ]
 
-VALID_CURRENT_STEPS = ["pending", "converting", "verifying", "completed"]
+VALID_CURRENT_STEPS = ["pending", "converting", "completed"]
 
 TASK_DETAIL_REQUIRED_FIELDS = [
     "task_id",
@@ -253,12 +251,30 @@ def list_tasks(
     return response.get("Items", [])
 
 
+# Cache MediaConvert endpoint URL at module level
+_mediaconvert_endpoint_url: str | None = None
+
+
 def get_mediaconvert_client():
-    """Get MediaConvert client with endpoint."""
-    mc = boto3.client("mediaconvert")
-    endpoints = mc.describe_endpoints()
-    endpoint_url = endpoints["Endpoints"][0]["Url"]
-    return boto3.client("mediaconvert", endpoint_url=endpoint_url)
+    """Get MediaConvert client with cached endpoint.
+
+    MediaConvert endpoint is account-specific and doesn't change,
+    so we cache it to avoid DescribeEndpoints rate limiting.
+    """
+    global _mediaconvert_endpoint_url
+
+    if _mediaconvert_endpoint_url is None:
+        # Check environment variable first (can be set in SAM template)
+        _mediaconvert_endpoint_url = os.environ.get("MEDIACONVERT_ENDPOINT")
+
+        if not _mediaconvert_endpoint_url:
+            # Fall back to API call (only once per Lambda instance)
+            mc = boto3.client("mediaconvert")
+            endpoints = mc.describe_endpoints()
+            _mediaconvert_endpoint_url = endpoints["Endpoints"][0]["Url"]
+            logger.info(f"Cached MediaConvert endpoint: {_mediaconvert_endpoint_url}")
+
+    return boto3.client("mediaconvert", endpoint_url=_mediaconvert_endpoint_url)
 
 
 def get_mediaconvert_job_progress(job_id: str) -> int:
@@ -286,11 +302,14 @@ def calculate_progress(files: list[dict]) -> tuple[int, str]:
 
     Progress is calculated dynamically at query time (not stored in DynamoDB).
 
-    File status to progress mapping:
+    File status to progress mapping (simplified):
     - PENDING: 0%
-    - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
-    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
+    - CONVERTING: 0-99% (from MediaConvert jobPercentComplete)
     - COMPLETED/DOWNLOADED/FAILED: 100%
+
+    Note: VERIFYING status is removed. Quality evaluation happens
+    as part of the CONVERTING phase completion using MediaConvert
+    per-frame metrics.
 
     Task progress is the average of all file progress percentages.
 
@@ -310,19 +329,14 @@ def calculate_progress(files: list[dict]) -> tuple[int, str]:
             # 0%
             pass
         elif status == "CONVERTING":
-            # 0-65% range, scaled from MediaConvert jobPercentComplete
+            # 0-99% range from MediaConvert jobPercentComplete
             job_id = f.get("mediaconvert_job_id")
             if job_id:
                 mc_progress = get_mediaconvert_job_progress(job_id)
-                # Scale 0-100% to 0-65%
-                total_progress += int(mc_progress * 0.65)
+                # Use MediaConvert progress directly (capped at 99%)
+                total_progress += min(mc_progress, 99)
             # else: 0%
             current_step = "converting"
-        elif status == "VERIFYING":
-            # 65-99% range: 65 + (verification_progress * 0.34)
-            verification_progress = float(f.get("verification_progress", 0))
-            total_progress += 65 + int(verification_progress * 0.34)
-            current_step = "verifying"
         elif status in ("COMPLETED", "DOWNLOADED", "FAILED"):
             # 100%
             total_progress += 100
@@ -347,11 +361,13 @@ def calculate_progress_simple(files: list[dict]) -> tuple[int, str]:
     Used for list view where we don't want to make API calls for each task.
     Uses fixed values for CONVERTING status instead of querying MediaConvert.
 
-    File status to progress mapping:
+    File status to progress mapping (simplified):
     - PENDING: 0%
-    - CONVERTING: 32% (midpoint of 0-65% range)
-    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
+    - CONVERTING: 50% (midpoint of 0-99% range)
     - COMPLETED/DOWNLOADED/FAILED: 100%
+
+    Note: VERIFYING status is removed. Quality evaluation happens
+    as part of the CONVERTING phase completion.
 
     Returns:
         Tuple of (progress_percentage, current_step)
@@ -368,13 +384,8 @@ def calculate_progress_simple(files: list[dict]) -> tuple[int, str]:
         if status == "PENDING":
             pass  # 0%
         elif status == "CONVERTING":
-            total_progress += 32  # Midpoint of 0-65%
+            total_progress += 50  # Midpoint of 0-99%
             current_step = "converting"
-        elif status == "VERIFYING":
-            # 65-99% range: 65 + (verification_progress * 0.34)
-            verification_progress = float(f.get("verification_progress", 0))
-            total_progress += 65 + int(verification_progress * 0.34)
-            current_step = "verifying"
         elif status in ("COMPLETED", "DOWNLOADED", "FAILED"):
             total_progress += 100
 
@@ -393,11 +404,13 @@ def calculate_progress_simple(files: list[dict]) -> tuple[int, str]:
 def calculate_file_progress(file: dict) -> int:
     """Calculate progress percentage for a single file.
 
-    File status to progress mapping:
+    File status to progress mapping (simplified):
     - PENDING: 0%
-    - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
-    - VERIFYING: 65-99% (65 + verification_progress * 0.34)
+    - CONVERTING: 0-99% (from MediaConvert jobPercentComplete)
     - COMPLETED/DOWNLOADED/FAILED: 100%
+
+    Note: VERIFYING status is removed. Quality evaluation happens
+    as part of the CONVERTING phase completion.
 
     Returns:
         Progress percentage (0-100)
@@ -407,17 +420,13 @@ def calculate_file_progress(file: dict) -> int:
     if status == "PENDING":
         return 0
     elif status == "CONVERTING":
-        # 0-65% range, scaled from MediaConvert jobPercentComplete
+        # 0-99% range from MediaConvert jobPercentComplete
         job_id = file.get("mediaconvert_job_id")
         if job_id:
             mc_progress = get_mediaconvert_job_progress(job_id)
-            # Scale 0-100% to 0-65%
-            return int(mc_progress * 0.65)
+            # Use MediaConvert progress directly (capped at 99%)
+            return min(mc_progress, 99)
         return 0
-    elif status == "VERIFYING":
-        # 65-99% range: 65 + (verification_progress * 0.34)
-        verification_progress = float(file.get("verification_progress", 0))
-        return 65 + int(verification_progress * 0.34)
     elif status in ("COMPLETED", "DOWNLOADED", "FAILED"):
         return 100
     return 0
@@ -452,6 +461,7 @@ def format_task_response(task: dict, include_download_urls: bool = False) -> dic
             body = quality_result.get("body", quality_result)
             formatted_file["quality_result"] = {
                 "ssim_score": body.get("ssim_score"),
+                "vmaf_score": body.get("vmaf_score"),
                 "original_size": body.get("original_size"),
                 "converted_size": body.get("converted_size"),
                 "compression_ratio": body.get("compression_ratio"),

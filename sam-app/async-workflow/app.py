@@ -214,9 +214,12 @@ def start_conversion(event: dict) -> dict:
 
 
 def create_job_settings(source_key: str, output_key: str, preset: str) -> dict:
-    """Create MediaConvert job settings.
+    """Create MediaConvert job settings with per-frame metrics.
 
     Settings are aligned with sync mode (mediaconvert.py) for consistency.
+    Per-frame metrics (SSIM, VMAF) are enabled for quality evaluation.
+
+    Requirements: 1.1, 1.2, 1.3
     """
     # Quality settings based on preset (same as sync mode)
     quality_settings = {
@@ -244,8 +247,11 @@ def create_job_settings(source_key: str, output_key: str, preset: str) -> dict:
                 "OutputGroupSettings": {
                     "Type": "FILE_GROUP_SETTINGS",
                     "FileGroupSettings": {
-                        "Destination": f"s3://{S3_BUCKET}/{output_key.rsplit('/', 1)[0]}/"
+                        "Destination": f"s3://{S3_BUCKET}/{output_key.rsplit('/', 1)[0]}/",
                     },
+                    # Per-frame metrics configuration (Requirements: 1.1, 1.3)
+                    # Must be at OutputGroupSettings level as a list of metric type strings
+                    "PerFrameMetrics": ["SSIM", "VMAF"],
                 },
                 "Outputs": [
                     {
@@ -268,21 +274,23 @@ def create_job_settings(source_key: str, output_key: str, preset: str) -> dict:
                                         "QvbrQualityLevelFineTune": 0,
                                     },
                                     "MaxBitrate": settings["max_bitrate"],
-                                    "GopSize": 90,
-                                    "GopSizeUnits": "FRAMES",
+                                    # GOP settings: let MediaConvert auto-select optimal values
+                                    "GopSizeUnits": "AUTO",
                                     "ParNumerator": 1,
                                     "ParDenominator": 1,
                                     "ParControl": "SPECIFIED",
-                                    "NumberBFramesBetweenReferenceFrames": 3,
+                                    # B-frames: let MediaConvert auto-select optimal count
                                     "NumberReferenceFrames": 3,
                                     "Slices": 1,
                                     "InterlaceMode": "PROGRESSIVE",
                                     "SceneChangeDetect": "ENABLED",
-                                    "MinIInterval": 0,
-                                    "AdaptiveQuantization": "HIGH",
-                                    "FlickerAdaptiveQuantization": "ENABLED",
-                                    "SpatialAdaptiveQuantization": "ENABLED",
-                                    "TemporalAdaptiveQuantization": "ENABLED",
+                                    # Quality optimization settings (AWS recommended)
+                                    "QualityTuningLevel": "MULTI_PASS_HQ",
+                                    "DynamicSubGop": "ADAPTIVE",
+                                    "GopBReference": "ENABLED",
+                                    # AdaptiveQuantization: AUTO lets MediaConvert
+                                    # automatically select optimal quantization settings
+                                    "AdaptiveQuantization": "AUTO",
                                     "UnregisteredSeiTimecode": "DISABLED",
                                     "SampleAdaptiveOffsetFilterMode": "ADAPTIVE",
                                     "WriteMp4PackagingType": "HVC1",
@@ -325,7 +333,25 @@ def create_job_settings(source_key: str, output_key: str, preset: str) -> dict:
 
 
 def check_conversion_status(event: dict) -> dict:
-    """Check MediaConvert job status."""
+    """Check MediaConvert job status and evaluate quality.
+
+    When job completes:
+    1. Parse quality metrics CSV files from S3
+    2. Evaluate SSIM and VMAF against thresholds
+    3. Return result with quality evaluation
+
+    This replaces the separate Quality Checker Lambda invocation.
+
+    Requirements: 2.1, 2.2, 3.1, 3.2, 3.3, 3.4, 7.1, 7.2
+    """
+    from quality_metrics import (
+        QualityEvaluator,
+        QualityMetricsError,
+        QualityMetricsParser,
+        get_ssim_threshold,
+        get_vmaf_threshold,
+    )
+
     job_id = event.get("job_id")
     task_id = event.get("task_id")
     file_info = event.get("file", {})
@@ -339,12 +365,8 @@ def check_conversion_status(event: dict) -> dict:
     result = {"status": status, "job_id": job_id}
 
     if status == "COMPLETE":
-        # Update file status to VERIFYING before quality check
-        if task_id and file_id:
-            update_file_status(task_id, file_id, "VERIFYING")
         # Get output file path from job settings
         # MediaConvert output: {Destination}/{InputBaseName}{NameModifier}.{Extension}
-        # e.g., s3://bucket/output/task/file/ + MVI_8155 + _h265 + .mp4
         output_group = job["Settings"]["OutputGroups"][0]
         destination = output_group["OutputGroupSettings"]["FileGroupSettings"]["Destination"]
         name_modifier = output_group["Outputs"][0].get("NameModifier", "")
@@ -352,12 +374,77 @@ def check_conversion_status(event: dict) -> dict:
 
         # Get input filename to construct output path
         input_file = job["Settings"]["Inputs"][0]["FileInput"]
-        input_basename = Path(input_file).stem  # e.g., MVI_8155
+        input_basename = Path(input_file).stem
 
         # Construct full output path
         output_filename = f"{input_basename}{name_modifier}.{extension}"
         output_s3_uri = destination + output_filename
-        result["output_s3_key"] = output_s3_uri.replace(f"s3://{S3_BUCKET}/", "")
+        output_s3_key = output_s3_uri.replace(f"s3://{S3_BUCKET}/", "")
+        result["output_s3_key"] = output_s3_key
+
+        # Parse quality metrics from CSV files (Requirements: 2.1, 2.2)
+        parser = QualityMetricsParser(s3_bucket=S3_BUCKET)
+        try:
+            metrics = parser.parse_metrics_from_s3(task_id, file_id, output_s3_key)
+
+            # Evaluate quality (Requirements: 3.1, 3.2, 3.3, 3.4)
+            evaluator = QualityEvaluator(
+                ssim_threshold=get_ssim_threshold(),
+                vmaf_threshold=get_vmaf_threshold(),
+            )
+            evaluation = evaluator.evaluate(metrics)
+
+            # Get file sizes for compression metrics
+            s3 = boto3.client("s3")
+            source_s3_key = file_info.get("source_s3_key")
+            original_size = 0
+            converted_size = 0
+
+            if source_s3_key:
+                try:
+                    original_response = s3.head_object(Bucket=S3_BUCKET, Key=source_s3_key)
+                    original_size = original_response["ContentLength"]
+                except Exception as e:
+                    logger.warning(f"Failed to get original file size: {e}")
+
+            try:
+                converted_response = s3.head_object(Bucket=S3_BUCKET, Key=output_s3_key)
+                converted_size = converted_response["ContentLength"]
+            except Exception as e:
+                logger.warning(f"Failed to get converted file size: {e}")
+
+            # Calculate compression metrics
+            compression_ratio = original_size / converted_size if converted_size > 0 else 0.0
+            space_saved_bytes = original_size - converted_size
+            space_saved_percent = (
+                (space_saved_bytes / original_size * 100) if original_size > 0 else 0.0
+            )
+
+            result["quality_result"] = {
+                "passed": evaluation.passed,
+                "ssim_score": evaluation.ssim_score,
+                "vmaf_score": evaluation.vmaf_score,
+                "original_size": original_size,
+                "converted_size": converted_size,
+                "compression_ratio": compression_ratio,
+                "space_saved_bytes": space_saved_bytes,
+                "space_saved_percent": space_saved_percent,
+                "failure_reason": evaluation.failure_reason,
+            }
+            # Step Functions expects quality_passed at top level for CheckQualityResult state
+            result["quality_passed"] = evaluation.passed
+
+            logger.info(
+                f"Quality evaluation for {file_id}: "
+                f"SSIM={evaluation.ssim_score:.4f}, VMAF={evaluation.vmaf_score:.2f}, "
+                f"passed={evaluation.passed}"
+            )
+
+        except QualityMetricsError as e:
+            # CSV parse errors should fail immediately, not trigger quality retry
+            # Let Step Functions Catch block handle as system error
+            logger.error(f"Quality metrics parsing failed: {e}")
+            raise
 
     elif status == "ERROR":
         error_code = job.get("ErrorCode", 0)
@@ -397,7 +484,7 @@ def handle_conversion_error(event: dict) -> dict:
 
 
 def handle_quality_failure(event: dict) -> dict:
-    """Handle SSIM quality failure with adaptive retry.
+    """Handle quality failure (SSIM/VMAF) with adaptive retry.
 
     For adaptive presets (ending with +):
     - Try next preset in chain if available
@@ -409,9 +496,11 @@ def handle_quality_failure(event: dict) -> dict:
     - Otherwise fail immediately
 
     Best-effort mode: Accept the result even if below threshold, with a warning.
-    This matches sync behavior where the best SSIM result is selected.
+    This matches sync behavior where the best quality result is selected.
 
     Returns updated file object with preset_attempts for Step Functions state.
+
+    Requirements: 3.5
     """
     task_id = event.get("task_id")
     file_info = event.get("file", {})
@@ -427,13 +516,15 @@ def handle_quality_failure(event: dict) -> dict:
     # Check if this is a retry from an adaptive preset
     is_retry_from_adaptive = len(preset_attempts) > 0
 
+    failure_reason = quality_result.get("failure_reason", "Quality threshold not met")
+
     if not is_adaptive and not is_retry_from_adaptive:
         # Non-adaptive and not a retry: fail immediately
         update_file_status(
             task_id,
             file_id,
             "FAILED",
-            {"error_message": "SSIM threshold not met", "quality_result": quality_result},
+            {"error_message": failure_reason, "quality_result": quality_result},
         )
         return {"should_retry": False, "reason": "non_adaptive_preset"}
 
@@ -457,7 +548,7 @@ def handle_quality_failure(event: dict) -> dict:
 
     # No more presets to try (or retry from adaptive failed)
     # Use best-effort mode: accept the best result even if below threshold
-    # This matches sync behavior where the highest SSIM result is selected
+    # This matches sync behavior where the highest quality result is selected
     return {
         "should_retry": False,
         "reason": "best_effort",
@@ -471,6 +562,8 @@ def file_complete(event: dict) -> dict:
 
     For COMPLETED files, also deletes the input file from S3 to save storage.
     For FAILED files, also deletes the input file from S3 (no retry needed).
+
+    Requirements: 7.1, 7.2
     """
     task_id = event.get("task_id")
     file_info = event.get("file", {})
@@ -487,6 +580,7 @@ def file_complete(event: dict) -> dict:
     if output_s3_key:
         updates["output_s3_key"] = output_s3_key
     if quality_result:
+        # Ensure quality_result includes ssim_score and vmaf_score (Requirements: 7.1, 7.2)
         updates["quality_result"] = quality_result
     if best_effort:
         updates["best_effort"] = True

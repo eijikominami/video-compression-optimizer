@@ -12,7 +12,7 @@ A tool to convert videos in Apple Photos to H.265 format to save storage space.
 - Automatic scanning of Apple Photos library videos
 - Native Swift PhotoKit implementation for fast, reliable Photos access
 - High-quality H.265 conversion using AWS MediaConvert
-- SSIM-based quality verification
+- SSIM and VMAF-based quality verification using MediaConvert per-frame metrics
 - Metadata preservation (capture date, location, albums)
 - iCloud video status detection
 - Efficient conversion with Top-N selection
@@ -95,6 +95,22 @@ vco scan --top-n 10
 # Output in JSON format
 vco scan --json
 ```
+
+**Scan Summary Categories**:
+
+| Category | Description |
+|----------|-------------|
+| Total videos | All videos in Photos library |
+| Conversion candidates | Videos using inefficient codecs (H.264, MPEG-2, etc.) |
+| Already optimized | Videos already using efficient codecs (H.265, AV1, VP9) |
+| Professional format | ProRes, DNxHD, CineForm, RAW - skipped (manual review recommended) |
+| Skipped | Videos excluded from conversion (see below) |
+
+**Skipped Reasons**:
+- Duration too short (< 1 second)
+- Image-based codec (JPEG, PNG, GIF - not true video)
+- Unsupported codec by MediaConvert
+- File not accessible
 
 ### Convert
 
@@ -214,20 +230,31 @@ vco config set conversion.max_concurrent 3
 | `balanced+` | 6-7 → 8-9 | Retry with high if balanced fails quality check (best-effort) |
 | `compression` | 4-5 | Maximum compression |
 
+### Quality Metrics
+
+VCO uses MediaConvert's per-frame metrics to evaluate video quality:
+
+| Metric | Range | Threshold | Description |
+|--------|-------|-----------|-------------|
+| SSIM | 0-1 | >= 0.95 | Structural Similarity Index |
+| VMAF | 0-100 | >= 70 | Video Multi-Method Assessment Fusion |
+
+Both metrics must meet their thresholds for quality verification to pass.
+
 ### balanced+ Preset (Adaptive)
 
 `balanced+` is an adaptive preset with the following behavior:
 
-1. First convert with `balanced` and check SSIM score
-2. If SSIM >= 0.95, finish as success
-3. If SSIM < 0.95, reconvert with `high`
-4. If `high` also has SSIM < 0.95, **best-effort mode** applies, adopting the result with higher SSIM score
+1. First convert with `balanced` and check SSIM/VMAF scores
+2. If SSIM >= 0.95 and VMAF >= 70, finish as success
+3. If either threshold is not met, reconvert with `high`
+4. If `high` also fails, **best-effort mode** applies, adopting the result
 
-In best-effort mode, conversion is treated as successful even if SSIM threshold is not met. CLI output shows when best-effort mode was used:
+In best-effort mode, conversion is treated as successful even if quality thresholds are not met. CLI output shows when best-effort mode was used:
 
 ```
 Best-effort mode used:
-  - video.mp4: preset=balanced, SSIM=0.9132
+  - video.mp4: preset=balanced, SSIM=0.9132, VMAF=68.5
 ```
 
 ## Workflow

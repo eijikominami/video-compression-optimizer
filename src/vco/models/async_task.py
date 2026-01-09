@@ -27,18 +27,23 @@ class TaskStatus(Enum):
 class FileStatus(Enum):
     """Status of an individual file within a task.
 
-    Status transitions:
+    Status transitions (simplified):
     - PENDING: Waiting to start or retry
-    - CONVERTING: MediaConvert job running (0-30% progress)
-    - VERIFYING: SSIM quality check running (65% progress, fixed)
+    - CONVERTING: MediaConvert job running (0-99% progress)
     - COMPLETED: Successfully processed (100%)
     - DOWNLOADED: File has been downloaded by user
     - FAILED: Processing failed (100%)
+
+    Note: VERIFYING status is removed. Quality evaluation happens
+    as part of the CONVERTING phase completion using MediaConvert
+    per-frame metrics.
+
+    Requirements: 4.1, 4.4
     """
 
     PENDING = "PENDING"
     CONVERTING = "CONVERTING"
-    VERIFYING = "VERIFYING"
+    # VERIFYING = "VERIFYING"  # REMOVED - Quality evaluation now in CONVERTING phase
     COMPLETED = "COMPLETED"
     DOWNLOADED = "DOWNLOADED"
     FAILED = "FAILED"
@@ -56,10 +61,9 @@ class AsyncFile(BaseVideoMetadata):
         source_s3_key: S3 key for the uploaded source file
         output_s3_key: S3 key for the converted output file
         metadata_s3_key: S3 key for the metadata sidecar file
-        status: Current processing status (PENDING, CONVERTING, VERIFYING, COMPLETED, FAILED)
+        status: Current processing status (PENDING, CONVERTING, COMPLETED, FAILED)
         mediaconvert_job_id: MediaConvert job ID (for progress lookup during CONVERTING)
-        verification_progress: Progress of VERIFYING phase (0-100)
-        quality_result: Quality verification result (SSIM, compression ratio, etc.)
+        quality_result: Quality verification result (SSIM, VMAF, compression ratio, etc.)
         error_code: Error code if processing failed
         error_message: Error message if processing failed
         retry_count: Number of retry attempts for transient errors
@@ -70,6 +74,11 @@ class AsyncFile(BaseVideoMetadata):
         checksum_algorithm: Algorithm used for checksum ("ETag" or "SHA256")
         downloaded_at: Timestamp when file was downloaded by user
         download_available: Whether file is available for download
+
+    Note: verification_progress is removed. Quality evaluation now happens
+    as part of MediaConvert job completion using per-frame metrics.
+
+    Requirements: 4.1, 5.4, 7.2
     """
 
     # AsyncFile specific fields (all with defaults to avoid dataclass issues)
@@ -79,8 +88,8 @@ class AsyncFile(BaseVideoMetadata):
     metadata_s3_key: str | None = None
     status: FileStatus = FileStatus.PENDING
     mediaconvert_job_id: str | None = None
-    verification_progress: int = 0  # VERIFYING phase progress (0-100)
-    quality_result: dict | None = None
+    # verification_progress removed - Quality evaluation now in CONVERTING phase
+    quality_result: dict | None = None  # Includes ssim_score, vmaf_score
     error_code: int | None = None
     error_message: str | None = None
     retry_count: int = 0
@@ -109,7 +118,7 @@ class AsyncFile(BaseVideoMetadata):
                 "metadata_s3_key": self.metadata_s3_key,
                 "status": self.status.value,
                 "mediaconvert_job_id": self.mediaconvert_job_id,
-                "verification_progress": self.verification_progress,
+                # verification_progress removed
                 "quality_result": self.quality_result,
                 "error_code": self.error_code,
                 "error_message": self.error_message,
@@ -144,7 +153,7 @@ class AsyncFile(BaseVideoMetadata):
             metadata_s3_key=data.get("metadata_s3_key"),
             status=FileStatus(data.get("status", "PENDING")),
             mediaconvert_job_id=data.get("mediaconvert_job_id"),
-            verification_progress=data.get("verification_progress", 0),
+            # verification_progress removed
             quality_result=data.get("quality_result"),
             error_code=data.get("error_code"),
             error_message=data.get("error_message"),
@@ -259,16 +268,22 @@ class AsyncTask:
     def calculate_progress(self) -> int:
         """Calculate overall progress percentage.
 
-        Progress breakdown per file:
+        Progress breakdown per file (simplified):
         - PENDING: 0%
-        - CONVERTING: 0-65% (scaled from MediaConvert jobPercentComplete)
-        - VERIFYING: 65-99% (65 + verification_progress * 0.34)
+        - CONVERTING: 0-99% (from MediaConvert jobPercentComplete)
         - COMPLETED/FAILED: 100%
+
+        Note: VERIFYING status is removed. Quality evaluation happens
+        as part of the CONVERTING phase completion. The verification_progress
+        field is no longer needed because MediaConvert calculates quality
+        metrics as part of the job, and jobPercentComplete includes this work.
 
         Task overall progress is the average of all file progress values.
 
         Returns:
             Progress percentage (0-100)
+
+        Requirements: 5.1, 5.2, 5.3
         """
         if self.status == TaskStatus.PENDING:
             return 0
@@ -288,14 +303,10 @@ class AsyncTask:
             if f.status == FileStatus.PENDING:
                 total_progress += 0
             elif f.status == FileStatus.CONVERTING:
-                # CONVERTING: 0-65% range
-                # Note: actual jobPercentComplete would be fetched from MediaConvert API
-                # Here we use a default of 32% (midpoint) if not available
-                total_progress += 32
-            elif f.status == FileStatus.VERIFYING:
-                # VERIFYING: 65-99% range
-                # Formula: 65 + (verification_progress * 0.34)
-                total_progress += 65 + int(f.verification_progress * 0.34)
+                # CONVERTING: 0-99% range
+                # Use MediaConvert jobPercentComplete directly (fetched from API)
+                # Here we use a default of 50% (midpoint) if not available
+                total_progress += 50
             elif f.status in (FileStatus.COMPLETED, FileStatus.DOWNLOADED):
                 total_progress += 100
             elif f.status == FileStatus.FAILED:

@@ -326,6 +326,7 @@ class ImportableItem:
         converted_size: Converted file size in bytes
         compression_ratio: Ratio of original to converted size
         ssim_score: Structural Similarity Index (0.0-1.0)
+        vmaf_score: Video Multi-Method Assessment Fusion score (0.0-100.0)
         albums: List of album names
         capture_date: Date when the video was captured
         task_id: AWS task ID (AWS only)
@@ -342,6 +343,7 @@ class ImportableItem:
     converted_size: int
     compression_ratio: float
     ssim_score: float
+    vmaf_score: float = 0.0
     albums: list[str] = field(default_factory=list)
     capture_date: datetime | None = None
 

@@ -216,11 +216,11 @@ class TestAPIVersionCompatibility:
     def test_status_enum_values_stability(self):
         """Test that status enum values remain stable."""
         # Task status values that clients depend on
+        # Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
         expected_task_statuses = [
             "PENDING",
             "UPLOADING",
             "CONVERTING",
-            "VERIFYING",
             "COMPLETED",
             "PARTIALLY_COMPLETED",
             "FAILED",
@@ -233,10 +233,10 @@ class TestAPIVersionCompatibility:
             assert status.value == status_value
 
         # File status values that clients depend on
+        # Note: VERIFYING status removed - quality evaluation now in CONVERTING phase
         expected_file_statuses = [
             "PENDING",
             "CONVERTING",
-            "VERIFYING",
             "COMPLETED",
             "DOWNLOADED",
             "FAILED",

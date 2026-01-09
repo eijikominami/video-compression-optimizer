@@ -1,13 +1,12 @@
 """Unit tests for progress calculation.
 
-Tests: Task 6.1 - Progress calculation function
-Requirements: 6.1, 6.2, 6.5
+Tests: Task 2.5.2 - Progress calculation function (simplified workflow)
+Requirements: 5.1, 5.2, 5.3
 """
 
 from vco.utils.progress import (
     PROGRESS_COMPLETED,
     PROGRESS_CONVERTING_MIDPOINT,
-    PROGRESS_VERIFYING,
     calculate_progress,
     calculate_progress_simple,
 )
@@ -43,13 +42,6 @@ class TestCalculateProgressBasic:
         assert progress == 100
         assert step == "completed"
 
-    def test_single_verifying_file(self):
-        """Test progress for single VERIFYING file."""
-        files = [{"status": "VERIFYING"}]
-        progress, step = calculate_progress(files)
-        assert progress == PROGRESS_VERIFYING
-        assert step == "verifying"
-
 
 class TestCalculateProgressConverting:
     """Tests for CONVERTING status progress calculation."""
@@ -69,20 +61,20 @@ class TestCalculateProgressConverting:
             return 50  # 50% MediaConvert progress
 
         progress, step = calculate_progress(files, get_mediaconvert_progress=mock_get_progress)
-        # 50% * 0.65 = 32%
-        assert progress == 32
+        # 50% MediaConvert progress used directly (capped at 99%)
+        assert progress == 50
         assert step == "converting"
 
     def test_converting_with_callback_full_progress(self):
-        """Test CONVERTING at 100% MediaConvert progress."""
+        """Test CONVERTING at 100% MediaConvert progress (capped at 99%)."""
         files = [{"status": "CONVERTING", "mediaconvert_job_id": "job-123"}]
 
         def mock_get_progress(job_id: str) -> int:
             return 100
 
         progress, step = calculate_progress(files, get_mediaconvert_progress=mock_get_progress)
-        # 100% * 0.65 = 65%
-        assert progress == 65
+        # 100% capped to 99% (CONVERTING never reaches 100%)
+        assert progress == 99
         assert step == "converting"
 
     def test_converting_without_job_id(self):
@@ -126,13 +118,13 @@ class TestCalculateProgressMultipleFiles:
         """Test progress with various statuses."""
         files = [
             {"status": "COMPLETED"},  # 100%
-            {"status": "VERIFYING"},  # 65%
+            {"status": "CONVERTING"},  # 50% (midpoint)
             {"status": "PENDING"},  # 0%
         ]
         progress, step = calculate_progress(files)
-        # (100 + 65 + 0) / 3 = 55%
-        assert progress == 55
-        assert step == "verifying"
+        # (100 + 50 + 0) / 3 = 50%
+        assert progress == 50
+        assert step == "converting"
 
     def test_completed_and_failed_counts_as_completed(self):
         """Test that FAILED files count toward completion."""
@@ -160,7 +152,7 @@ class TestCalculateProgressSimple:
         """Test that simple version matches calculate for non-CONVERTING statuses."""
         files = [
             {"status": "COMPLETED"},
-            {"status": "VERIFYING"},
+            {"status": "PENDING"},
         ]
         simple_progress, simple_step = calculate_progress_simple(files)
         full_progress, full_step = calculate_progress(files)
@@ -174,12 +166,11 @@ class TestProgressConstants:
 
     def test_progress_constants_values(self):
         """Test that progress constants have expected values."""
-        assert PROGRESS_CONVERTING_MIDPOINT == 32
-        assert PROGRESS_VERIFYING == 65
+        assert PROGRESS_CONVERTING_MIDPOINT == 50
         assert PROGRESS_COMPLETED == 100
 
     def test_converting_range(self):
-        """Test that CONVERTING progress is in 0-65% range."""
+        """Test that CONVERTING progress is in 0-99% range."""
         # Test with various MediaConvert progress values
         for mc_progress in [0, 25, 50, 75, 100]:
             files = [{"status": "CONVERTING", "mediaconvert_job_id": "job-123"}]
@@ -188,7 +179,7 @@ class TestProgressConstants:
                 return mc_progress
 
             progress, _ = calculate_progress(files, get_mediaconvert_progress=mock_get_progress)
-            assert 0 <= progress <= 65, (
+            assert 0 <= progress <= 99, (
                 f"Progress {progress} out of range for MC progress {mc_progress}"
             )
 
@@ -207,12 +198,6 @@ class TestCurrentStepDetermination:
         files = [{"status": "PENDING"}, {"status": "CONVERTING"}]
         _, step = calculate_progress(files)
         assert step == "converting"
-
-    def test_step_verifying_when_any_verifying(self):
-        """Test step is 'verifying' when any file is VERIFYING."""
-        files = [{"status": "CONVERTING"}, {"status": "VERIFYING"}]
-        _, step = calculate_progress(files)
-        assert step == "verifying"
 
     def test_step_completed_when_all_done(self):
         """Test step is 'completed' when all files are COMPLETED or FAILED."""

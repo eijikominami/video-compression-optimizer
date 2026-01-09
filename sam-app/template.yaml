@@ -88,6 +88,25 @@ Globals:
         LOG_LEVEL: INFO
 
 Resources:
+  # =============================================================================
+  # Lambda Layers
+  # =============================================================================
+
+  # boto3 Layer for MediaConvert PerFrameMetrics support
+  # Lambda's default boto3 (~1.28.x) doesn't support PerFrameMetrics parameter
+  # This layer provides boto3 1.35+ which includes the required API support
+  Boto3Layer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub 'vco-boto3-layer-${Environment}'
+      Description: boto3 1.35+ for MediaConvert PerFrameMetrics support
+      ContentUri: layers/boto3/
+      CompatibleRuntimes:
+        - python3.11
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.11
+
   # S3 Bucket for video files and quality check results
   VideoStorageBucket:
     Type: AWS::S3::Bucket
@@ -164,42 +183,6 @@ Resources:
           Value: VideoCompressionOptimizer
         - Key: Environment
           Value: !Ref Environment
-
-  # Quality Checker Lambda Function
-  QualityCheckerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'vco-quality-checker-${Environment}'
-      Description: Validates video conversion quality (SSIM, file size, playback)
-      CodeUri: quality-checker/
-      Handler: app.lambda_handler
-      Runtime: python3.11
-      Architectures:
-        - x86_64
-      MemorySize: !Ref LambdaMemorySize
-      Timeout: !Ref LambdaTimeout
-      EphemeralStorage:
-        Size: 10240  # 10GB - required for processing large video files (up to ~5GB each)
-      Layers:
-        # Custom FFmpeg layer (created from static build)
-        - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:vco-ffmpeg:2'
-      Environment:
-        Variables:
-          S3_BUCKET: !Ref VideoStorageBucket
-          SSIM_THRESHOLD: '0.95'
-          DYNAMODB_TABLE: !Ref AsyncTasksTable
-          # FFmpeg binary path in Lambda layer
-          PATH: /opt/bin:/var/lang/bin:/usr/local/bin:/usr/bin:/bin
-      Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref VideoStorageBucket
-        - S3WritePolicy:
-            BucketName: !Ref VideoStorageBucket
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AsyncTasksTable
-      Tags:
-        Application: VideoCompressionOptimizer
-        Environment: !Ref Environment
 
   # DynamoDB Table for Async Tasks
   AsyncTasksTable:
@@ -331,6 +314,7 @@ Resources:
         Variables:
           DYNAMODB_TABLE: !Ref AsyncTasksTable
           S3_BUCKET: !Ref VideoStorageBucket
+          MEDIACONVERT_ENDPOINT: !Sub 'https://mediaconvert.${AWS::Region}.amazonaws.com'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AsyncTasksTable
@@ -427,21 +411,23 @@ Resources:
         - x86_64
       MemorySize: 512
       Timeout: 300
+      Layers:
+        - !Ref Boto3Layer
       Environment:
         Variables:
           DYNAMODB_TABLE: !Ref AsyncTasksTable
           S3_BUCKET: !Ref VideoStorageBucket
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
-          QUALITY_CHECKER_ARN: !GetAtt QualityCheckerFunction.Arn
           # Pre-configured MediaConvert endpoint to avoid rate limiting during parallel processing
           MEDIACONVERT_ENDPOINT: 'https://mediaconvert.ap-northeast-1.amazonaws.com'
+          # Quality thresholds for MediaConvert per-frame metrics
+          SSIM_THRESHOLD: '0.95'
+          VMAF_THRESHOLD: '70'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AsyncTasksTable
         - S3CrudPolicy:
             BucketName: !Ref VideoStorageBucket
-        - LambdaInvokePolicy:
-            FunctionName: !Ref QualityCheckerFunction
         - Statement:
             - Effect: Allow
               Action:
@@ -468,13 +454,10 @@ Resources:
       DefinitionUri: statemachine/async-workflow.asl.json
       DefinitionSubstitutions:
         WorkflowFunctionArn: !GetAtt AsyncWorkflowFunction.Arn
-        QualityCheckerFunctionArn: !GetAtt QualityCheckerFunction.Arn
         DynamoDBTableName: !Ref AsyncTasksTable
       Policies:
         - LambdaInvokePolicy:
             FunctionName: !Ref AsyncWorkflowFunction
-        - LambdaInvokePolicy:
-            FunctionName: !Ref QualityCheckerFunction
         - DynamoDBCrudPolicy:
             TableName: !Ref AsyncTasksTable
       Tags:
@@ -529,18 +512,6 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-  # CloudWatch Log Group for Quality Checker
-  QualityCheckerLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/${QualityCheckerFunction}'
-      RetentionInDays: !Ref LogsRetentionInDays
-      Tags:
-        - Key: Application
-          Value: VideoCompressionOptimizer
-        - Key: Environment
-          Value: !Ref Environment
-
   # IAM User for CLI access (optional, for local development)
   CLIAccessUser:
     Type: AWS::IAM::User
@@ -575,10 +546,6 @@ Resources:
                 Resource: !GetAtt MediaConvertRole.Arn
               - Effect: Allow
                 Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt QualityCheckerFunction.Arn
-              - Effect: Allow
-                Action:
                   - execute-api:Invoke
                 Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AsyncWorkflowApi}/*'
       Tags:
@@ -609,18 +576,6 @@ Outputs:
     Value: !GetAtt MediaConvertRole.Arn
     Export:
       Name: !Sub '${AWS::StackName}-MediaConvertRoleArn'
-
-  QualityCheckerFunctionArn:
-    Description: Quality Checker Lambda function ARN
-    Value: !GetAtt QualityCheckerFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-QualityCheckerArn'
-
-  QualityCheckerFunctionName:
-    Description: Quality Checker Lambda function name
-    Value: !Ref QualityCheckerFunction
-    Export:
-      Name: !Sub '${AWS::StackName}-QualityCheckerName'
 
   AsyncTasksTableName:
     Description: DynamoDB table name for async tasks

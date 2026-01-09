@@ -12,7 +12,7 @@ Apple Photos 内の動画を H.265 形式に変換してストレージを節約
 - Apple Photos ライブラリの動画を自動スキャン
 - ネイティブ Swift PhotoKit 実装による高速で信頼性の高い Photos アクセス
 - AWS MediaConvert による高品質な H.265 変換
-- SSIM ベースの品質検証
+- MediaConvert フレームごとのメトリクスによる SSIM/VMAF ベースの品質検証
 - メタデータ（撮影日時、位置情報、アルバム）の保持
 - iCloud 動画の状態検出
 - Top-N 選択による効率的な変換
@@ -95,6 +95,22 @@ vco scan --top-n 10
 # JSON 形式で出力
 vco scan --json
 ```
+
+**スキャン結果のカテゴリ**:
+
+| カテゴリ | 説明 |
+|---------|------|
+| Total videos | Photos ライブラリ内の全動画数 |
+| Conversion candidates | 非効率なコーデック（H.264、MPEG-2 等）を使用している動画 |
+| Already optimized | 効率的なコーデック（H.265、AV1、VP9）を使用済みの動画 |
+| Professional format | ProRes、DNxHD、CineForm、RAW - スキップ（手動レビュー推奨） |
+| Skipped | 変換対象外の動画（下記参照） |
+
+**スキップ理由**:
+- Duration too short（1 秒未満）
+- Image-based codec（JPEG、PNG、GIF - 真の動画ではない）
+- MediaConvert 非対応コーデック
+- ファイルにアクセス不可
 
 ### 変換
 
@@ -214,20 +230,31 @@ vco config set conversion.max_concurrent 3
 | `balanced+` | 6-7 → 8-9 | balanced で品質 NG なら high でリトライ（ベストエフォート） |
 | `compression` | 4-5 | 最大限の圧縮 |
 
+### 品質メトリクス
+
+VCO は MediaConvert のフレームごとのメトリクスを使用して動画品質を評価します：
+
+| メトリクス | 範囲 | 閾値 | 説明 |
+|-----------|------|------|------|
+| SSIM | 0-1 | >= 0.95 | 構造的類似性指標 |
+| VMAF | 0-100 | >= 70 | Video Multi-Method Assessment Fusion |
+
+両方のメトリクスが閾値を満たす必要があります。
+
 ### balanced+ プリセット（アダプティブ）
 
 `balanced+` は adaptive プリセットで、以下の動作をします：
 
-1. まず `balanced` で変換し、SSIM スコアをチェック
-2. SSIM >= 0.95 なら成功として終了
-3. SSIM < 0.95 なら `high` で再変換
-4. `high` でも SSIM < 0.95 の場合、**ベストエフォートモード**が適用され、より高い SSIM スコアの結果を採用
+1. まず `balanced` で変換し、SSIM/VMAF スコアをチェック
+2. SSIM >= 0.95 かつ VMAF >= 70 なら成功として終了
+3. いずれかの閾値を満たさない場合、`high` で再変換
+4. `high` でも閾値を満たさない場合、**ベストエフォートモード**が適用され、結果を採用
 
-ベストエフォートモードでは、SSIM 閾値を満たせなくても変換は成功として扱われます。CLI 出力でベストエフォートモードが使用されたことが表示されます：
+ベストエフォートモードでは、品質閾値を満たせなくても変換は成功として扱われます。CLI 出力でベストエフォートモードが使用されたことが表示されます：
 
 ```
 Best-effort mode used:
-  - video.mp4: preset=balanced, SSIM=0.9132
+  - video.mp4: preset=balanced, SSIM=0.9132, VMAF=68.5
 ```
 
 ## ワークフロー

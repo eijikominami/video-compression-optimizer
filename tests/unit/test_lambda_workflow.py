@@ -11,7 +11,15 @@ import pytest
 def load_workflow_module():
     if "workflow_app" in sys.modules:
         del sys.modules["workflow_app"]
-    _lambda_path = os.path.join(os.path.dirname(__file__), "../../sam-app/async-workflow/app.py")
+    if "quality_metrics" in sys.modules:
+        del sys.modules["quality_metrics"]
+
+    # Add async-workflow directory to path for quality_metrics import
+    _lambda_dir = os.path.join(os.path.dirname(__file__), "../../sam-app/async-workflow")
+    if _lambda_dir not in sys.path:
+        sys.path.insert(0, _lambda_dir)
+
+    _lambda_path = os.path.join(_lambda_dir, "app.py")
     _spec = importlib.util.spec_from_file_location("workflow_app", _lambda_path)
     module = importlib.util.module_from_spec(_spec)
     sys.modules["workflow_app"] = module
@@ -76,8 +84,10 @@ class TestCheckConversionStatus:
     def test_check_status_complete(self, monkeypatch):
         monkeypatch.setenv("S3_BUCKET", "test-bucket")
         module = load_workflow_module()
-        mock_client = MagicMock()
-        mock_client.get_job.return_value = {
+
+        # Mock MediaConvert client
+        mock_mc_client = MagicMock()
+        mock_mc_client.get_job.return_value = {
             "Job": {
                 "Status": "COMPLETE",
                 "Settings": {
@@ -93,10 +103,51 @@ class TestCheckConversionStatus:
                 },
             }
         }
-        module.get_mediaconvert_client = lambda: mock_client
-        result = module.check_conversion_status({"job_id": "job-123"})
+        module.get_mediaconvert_client = lambda: mock_mc_client
+
+        # Mock QualityMetricsParser to avoid S3 calls
+        from unittest.mock import patch
+
+        import quality_metrics
+
+        mock_metrics = MagicMock()
+        mock_metrics.ssim_average = 0.98
+        mock_metrics.ssim_min = 0.95
+        mock_metrics.ssim_max = 0.99
+        mock_metrics.vmaf_average = 85.0
+        mock_metrics.vmaf_min = 80.0
+        mock_metrics.vmaf_max = 90.0
+
+        mock_evaluation = MagicMock()
+        mock_evaluation.passed = True
+        mock_evaluation.ssim_score = 0.98
+        mock_evaluation.vmaf_score = 85.0
+        mock_evaluation.failure_reason = None
+
+        # Mock S3 client for file size checks
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.return_value = {"ContentLength": 1000000}
+
+        mock_parser_instance = MagicMock()
+        mock_parser_instance.parse_metrics_from_s3.return_value = mock_metrics
+
+        mock_evaluator_instance = MagicMock()
+        mock_evaluator_instance.evaluate.return_value = mock_evaluation
+
+        with patch.object(
+            quality_metrics, "QualityMetricsParser", return_value=mock_parser_instance
+        ):
+            with patch.object(
+                quality_metrics, "QualityEvaluator", return_value=mock_evaluator_instance
+            ):
+                with patch("boto3.client", return_value=mock_s3_client):
+                    result = module.check_conversion_status({"job_id": "job-123"})
+
         assert result["status"] == "COMPLETE"
         assert result["output_s3_key"] == "out/video_h265.mp4"
+        assert result["quality_passed"] is True
+        assert result["quality_result"]["ssim_score"] == 0.98
+        assert result["quality_result"]["vmaf_score"] == 85.0
 
     def test_check_status_error(self, monkeypatch):
         monkeypatch.setenv("S3_BUCKET", "test-bucket")

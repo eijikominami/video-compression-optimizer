@@ -130,7 +130,6 @@ API リクエスト/レスポンスの詳細は [API 仕様書](api-specificatio
 |-----|------|
 | `PENDING` | 処理待ち |
 | `CONVERTING` | MediaConvert 変換中 |
-| `VERIFYING` | SSIM 品質検証中 |
 | `COMPLETED` | 完了、ダウンロード可能 |
 | `DOWNLOADED` | ダウンロード済み |
 | `REMOVED` | ユーザーにより削除 |
@@ -143,21 +142,19 @@ API リクエスト/レスポンスの詳細は [API 仕様書](api-specificatio
 | FileStatus | 進捗率 | 説明 |
 |------------|--------|------|
 | `PENDING` | 0% | 処理待ち |
-| `CONVERTING` | 32% | MediaConvert 変換中（0-65% 範囲のデフォルト中間値） |
-| `VERIFYING` | 65-99% | 品質検証中（verification_progress に基づく） |
+| `CONVERTING` | 0-99% | MediaConvert 変換中（jobPercentComplete を使用） |
 | `COMPLETED` | 100% | 完了 |
 | `DOWNLOADED` | 100% | ダウンロード済み |
 | `FAILED` | 100% | 失敗（進捗計算上は完了扱い） |
 
-#### VERIFYING 進捗の計算式
+#### CONVERTING 進捗の計算
 
-```
-overall_progress = 65 + (verification_progress * 0.34)
-```
+MediaConvert の `jobPercentComplete` を直接使用:
+- `jobPercentComplete = 0` → 0%
+- `jobPercentComplete = 50` → 50%
+- `jobPercentComplete = 100` → 99%（COMPLETED 遷移前）
 
-- `verification_progress = 0` → 65%（SSIM 計算開始）
-- `verification_progress = 30` → 75%（フレーム抽出完了）
-- `verification_progress = 100` → 99%（SSIM 計算完了）
+デフォルト中間値（jobPercentComplete 未取得時）: 50%
 
 #### タスク全体の進捗
 
@@ -232,8 +229,7 @@ Apple Photos ライブラリからの動画情報。
 | `metadata_s3_key` | `str \| None` | `None` | メタデータS3キー |
 | `status` | `FileStatus` | `PENDING` | 処理状態 |
 | `mediaconvert_job_id` | `str \| None` | `None` | MediaConvert ジョブID |
-| `verification_progress` | `int` | `0` | VERIFYING フェーズの進捗 (0-100) |
-| `quality_result` | `dict \| None` | `None` | 品質検証結果 |
+| `quality_result` | `dict \| None` | `None` | 品質検証結果（ssim_score, vmaf_score を含む） |
 | `error_code` | `int \| None` | `None` | エラーコード |
 | `error_message` | `str \| None` | `None` | エラーメッセージ |
 | `retry_count` | `int` | `0` | リトライ回数 |
@@ -339,6 +335,7 @@ def video_info_to_conversion_result(video: VideoInfo, success: bool = False, err
 
 | バージョン | 日付 | 変更内容 |
 |-----------|------|---------|
+| 1.4.0 | 2026-01-07 | VERIFYING ステータス削除、verification_progress 削除、quality_result に vmaf_score 追加、進捗計算ロジック簡素化 |
 | 1.3.0 | 2026-01-06 | ドキュメント構成をリファクタリング（データストア → API → 実装の順序に変更） |
 | 1.2.0 | 2026-01-05 | VideoMetadata に original_uuid, original_filename フィールド追加 |
 | 1.1.0 | 2026-01-05 | AsyncFile に verification_progress フィールド追加 |

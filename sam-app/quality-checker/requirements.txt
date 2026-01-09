@@ -1,2 +1,0 @@
-# Quality Checker Lambda dependencies
-boto3>=1.26.0

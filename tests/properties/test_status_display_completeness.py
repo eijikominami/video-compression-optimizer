@@ -20,7 +20,6 @@ TASK_STATUSES = [
     "PENDING",
     "UPLOADING",
     "CONVERTING",
-    "VERIFYING",
     "COMPLETED",
     "PARTIALLY_COMPLETED",
     "FAILED",
@@ -94,7 +93,7 @@ def task_detail_strategy(draw):
 
     if processing_count > 0:
         # Still processing
-        task_status = draw(st.sampled_from(["UPLOADING", "CONVERTING", "VERIFYING"]))
+        task_status = draw(st.sampled_from(["UPLOADING", "CONVERTING"]))
     elif completed_count == file_count:
         task_status = "COMPLETED"
     elif failed_count == file_count:
@@ -127,9 +126,7 @@ def task_detail_strategy(draw):
     if task_status in ("COMPLETED", "PARTIALLY_COMPLETED", "FAILED"):
         completed_at = updated_at
     else:
-        current_step = draw(
-            st.sampled_from(["Uploading", "Converting", "Verifying quality", "Embedding metadata"])
-        )
+        current_step = draw(st.sampled_from(["Uploading", "Converting", "Embedding metadata"]))
         estimated_completion = datetime.now() + timedelta(
             minutes=draw(st.integers(min_value=1, max_value=120))
         )
@@ -184,7 +181,7 @@ class TestStatusDisplayCompleteness:
 
         Requirement 2.3: Current step is shown for active tasks.
         """
-        active_statuses = ["UPLOADING", "CONVERTING", "VERIFYING"]
+        active_statuses = ["UPLOADING", "CONVERTING"]
 
         if task.status in active_statuses:
             # Active tasks should have current step

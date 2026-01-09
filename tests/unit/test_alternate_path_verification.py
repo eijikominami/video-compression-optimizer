@@ -130,9 +130,7 @@ class TestStatusDisplayVerification:
             files = case["files"]
             completed = sum(1 for f in files if f["status"] == "COMPLETED")
             failed = sum(1 for f in files if f["status"] == "FAILED")
-            processing = sum(
-                1 for f in files if f["status"] in ["PENDING", "CONVERTING", "VERIFYING"]
-            )
+            processing = sum(1 for f in files if f["status"] in ["PENDING", "CONVERTING"])
 
             if processing > 0:
                 status = "CONVERTING"
