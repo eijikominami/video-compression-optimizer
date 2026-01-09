@@ -105,9 +105,7 @@ class TestDynamicProgressCallback:
         # Updates should be separate
         assert updates_1 is not updates_2
 
-    def test_progress_callback_receives_correct_video_info(
-        self, mock_swift_bridge, sample_video
-    ):
+    def test_progress_callback_receives_correct_video_info(self, mock_swift_bridge, sample_video):
         """Test that progress callback receives correct video information."""
         expected_path = Path("/tmp/downloaded_video.mov")
         mock_swift_bridge.download_from_icloud.return_value = expected_path
