@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,15 +80,14 @@ class TransferSummary:
     def __post_init__(self) -> None:
         """Validate summary integrity."""
         # Ensure counts match results
-        if self.results:
-            actual_successful = sum(1 for r in self.results if r.success)
-            actual_failed = sum(1 for r in self.results if not r.success)
-            if self.successful != actual_successful:
-                self.successful = actual_successful
-            if self.failed != actual_failed:
-                self.failed = actual_failed
-            if self.total != len(self.results):
-                self.total = len(self.results)
+        actual_successful = sum(1 for r in self.results if r.success)
+        actual_failed = sum(1 for r in self.results if not r.success)
+        if self.successful != actual_successful:
+            self.successful = actual_successful
+        if self.failed != actual_failed:
+            self.failed = actual_failed
+        if self.total != len(self.results):
+            self.total = len(self.results)
 
 
 @dataclass
@@ -120,6 +119,7 @@ class ParallelTransferService:
 
     Uses ThreadPoolExecutor to execute multiple downloads or uploads
     concurrently while respecting the configured concurrency limits.
+    Supports graceful cancellation via Ctrl+C.
     """
 
     def __init__(
@@ -139,6 +139,42 @@ class ParallelTransferService:
         self._active_count = 0
         self._active_count_lock = threading.Lock()
         self._max_active_count = 0
+        self._cancelled = False
+        self._cancel_lock = threading.Lock()
+        self._executor: ThreadPoolExecutor | None = None
+        self._futures: list[Future] = []
+
+    def cancel(self) -> None:
+        """Cancel all pending transfers.
+
+        Running transfers will complete, but no new transfers will start.
+        """
+        with self._cancel_lock:
+            self._cancelled = True
+            logger.info("Transfer cancellation requested")
+
+        # Cancel pending futures
+        for future in self._futures:
+            future.cancel()
+
+        # Shutdown executor without waiting
+        if self._executor:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def is_cancelled(self) -> bool:
+        """Check if cancellation has been requested.
+
+        Returns:
+            True if cancel() has been called
+        """
+        with self._cancel_lock:
+            return self._cancelled
+
+    def _reset_cancel_state(self) -> None:
+        """Reset cancellation state for new transfer operation."""
+        with self._cancel_lock:
+            self._cancelled = False
+        self._futures = []
 
     def _track_active(self, increment: bool) -> None:
         """Track the number of active transfers for testing.
@@ -233,6 +269,9 @@ class ParallelTransferService:
                 self._track_active(False)
 
         with ThreadPoolExecutor(max_workers=self.concurrency_limit) as executor:
+            self._executor = executor
+            self._reset_cancel_state()
+
             futures = {
                 executor.submit(execute_download, item_id, filename, download_func): (
                     item_id,
@@ -240,11 +279,40 @@ class ParallelTransferService:
                 )
                 for item_id, filename, download_func in items
             }
+            self._futures = list(futures.keys())
 
             completed_count = 0
+            cancelled_count = 0
             for future in as_completed(futures):
-                result = future.result()
-                results.append(result)
+                if self.is_cancelled():
+                    # Mark remaining as cancelled
+                    cancelled_count += 1
+                    item_id, filename = futures[future]
+                    results.append(
+                        TransferResult(
+                            item_id=item_id,
+                            filename=filename,
+                            success=False,
+                            error_message="Cancelled by user",
+                            transfer_time_seconds=0.0,
+                        )
+                    )
+                    continue
+
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    item_id, filename = futures[future]
+                    results.append(
+                        TransferResult(
+                            item_id=item_id,
+                            filename=filename,
+                            success=False,
+                            error_message=str(e),
+                            transfer_time_seconds=0.0,
+                        )
+                    )
                 completed_count += 1
 
                 if self.progress_callback:
@@ -254,6 +322,8 @@ class ParallelTransferService:
                         completed_count,
                         len(items),
                     )
+
+            self._executor = None
 
         total_time = time.time() - start_time
         successful = sum(1 for r in results if r.success)
@@ -324,6 +394,9 @@ class ParallelTransferService:
                 self._track_active(False)
 
         with ThreadPoolExecutor(max_workers=self.concurrency_limit) as executor:
+            self._executor = executor
+            self._reset_cancel_state()
+
             futures = {
                 executor.submit(execute_upload, item_id, filename, upload_func): (
                     item_id,
@@ -331,11 +404,38 @@ class ParallelTransferService:
                 )
                 for item_id, filename, upload_func in items
             }
+            self._futures = list(futures.keys())
 
             completed_count = 0
             for future in as_completed(futures):
-                result = future.result()
-                results.append(result)
+                if self.is_cancelled():
+                    # Mark remaining as cancelled
+                    item_id, filename = futures[future]
+                    results.append(
+                        TransferResult(
+                            item_id=item_id,
+                            filename=filename,
+                            success=False,
+                            error_message="Cancelled by user",
+                            transfer_time_seconds=0.0,
+                        )
+                    )
+                    continue
+
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    item_id, filename = futures[future]
+                    results.append(
+                        TransferResult(
+                            item_id=item_id,
+                            filename=filename,
+                            success=False,
+                            error_message=str(e),
+                            transfer_time_seconds=0.0,
+                        )
+                    )
                 completed_count += 1
 
                 if self.progress_callback:
@@ -345,6 +445,8 @@ class ParallelTransferService:
                         completed_count,
                         len(items),
                     )
+
+            self._executor = None
 
         total_time = time.time() - start_time
         successful = sum(1 for r in results if r.success)
