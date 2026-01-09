@@ -133,11 +133,16 @@ vco convert --skip-icloud
 # iCloud ダウンロードのタイムアウトを設定（デフォルト: 300 秒、範囲: 30-3600）
 vco convert --download-timeout 600
 
+# 並列転送の同時実行数を設定（デフォルト: 3、範囲: 1-10）
+vco convert --parallel 5
+
 # 確認プロンプトをスキップ
 vco convert --yes
 ```
 
 **iCloud 動画の自動ダウンロード**: `vco convert` を実行すると、iCloud のみの動画は Swift PhotoKit を使用して自動的にダウンロードされます。`--skip-icloud` でスキップ可能です。
+
+**並列転送**: ダウンロードとアップロードは並列で実行されます（デフォルト: 3 同時）。`--parallel N` で調整可能です。Ctrl+C でグレースフルにキャンセルできます。
 
 変換は AWS Step Functions を通じて非同期で処理されます。変換を送信した後、状態を確認してタスクを管理できます：
 
