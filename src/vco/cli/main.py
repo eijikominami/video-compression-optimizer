@@ -1343,7 +1343,6 @@ def _download_icloud_videos_parallel(
         Progress,
         SpinnerColumn,
         TextColumn,
-        TimeElapsedColumn,
     )
 
     from vco.photos.swift_bridge import SwiftBridge
@@ -1390,27 +1389,56 @@ def _download_icloud_videos_parallel(
 
     # Download with progress display
     console.print()
-    console.print("[bold]Downloading iCloud videos in parallel...[/bold]")
+
+    from rich.progress import (
+        DownloadColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
 
     progress = Progress(
         SpinnerColumn(),
-        TextColumn("[bold blue]{task.fields[filename]}"),
+        TextColumn("[bold blue]{task.description}"),
         BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TextColumn("{task.fields[size]}"),
-        TimeElapsedColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
         console=console,
     )
 
     # Create download functions for each candidate
     candidate_map: dict[str, Any] = {}  # item_id -> candidate
+    download_tasks: dict[str, Any] = {}  # filename -> task_id
 
     def create_download_func(candidate):
-        """Create a download function for a candidate."""
+        """Create a download function for a candidate with progress tracking."""
+        from vco.services.icloud_download import DownloadProgress
+
         video = candidate.video
+        filename = video.filename
 
         def download():
+            # Add task when download starts
+            if filename not in download_tasks:
+                task_id = progress.add_task(f"Downloading {filename}", total=video.file_size)
+                download_tasks[filename] = task_id
+
+            # Create progress callback for this specific download
+            def progress_callback(dp: DownloadProgress) -> None:
+                task_id = download_tasks.get(filename)
+                if task_id is not None:
+                    progress.update(task_id, completed=dp.downloaded_bytes)
+
+            # Set progress callback for this download
+            download_service.progress_callback = progress_callback
+
             result = download_service.download_video(video)
+
+            # Hide progress bar on completion
+            task_id = download_tasks.get(filename)
+            if task_id is not None:
+                progress.update(task_id, visible=False)
+
             if result.success and result.local_path:
                 # Update video path and is_local flag
                 video.path = result.local_path
@@ -1448,27 +1476,7 @@ def _download_icloud_videos_parallel(
 
     try:
         with progress:
-            # Add overall progress task
-            overall_task = progress.add_task(
-                "download",
-                filename=f"Downloading 0/{len(candidates)} files",
-                size=format_size(total_size),
-                total=len(candidates),
-            )
-
-            # Custom callback to update progress
-            def update_progress(filename: str, percent: int, current: int, total: int) -> None:
-                progress.update(
-                    overall_task,
-                    completed=current,
-                    filename=f"Downloading {current}/{total} files",
-                )
-
-            parallel_service.progress_callback = update_progress
             summary = parallel_service.download_parallel(items)
-
-            # Complete the progress bar
-            progress.update(overall_task, completed=len(candidates))
     finally:
         # Restore original signal handler
         signal.signal(signal.SIGINT, original_handler)
@@ -1517,12 +1525,16 @@ def _convert_async_parallel(
     ctx, candidates, quality: str, aws_config, concurrency_limit: int, skip_confirm: bool = False
 ):
     """Handle async conversion mode with parallel uploads."""
+    import time
+
     from rich.progress import (
         BarColumn,
         DownloadColumn,
         Progress,
         SpinnerColumn,
+        TaskID,
         TextColumn,
+        TimeRemainingColumn,
         TransferSpeedColumn,
     )
 
@@ -1547,47 +1559,64 @@ def _convert_async_parallel(
             profile_name=aws_config.profile or None,
         )
 
-        console.print("[bold]Uploading files in parallel...[/bold]")
+        console.print("[bold]Uploading files to S3...[/bold]")
 
-        # Use Rich Progress for upload progress display
+        # Use Rich Progress for upload progress display (same style as iCloud download)
         progress = Progress(
             SpinnerColumn(),
-            TextColumn("[bold blue]{task.fields[filename]}"),
+            TextColumn("[bold blue]{task.description}"),
             BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             DownloadColumn(),
             TransferSpeedColumn(),
+            TimeRemainingColumn(),
             console=console,
         )
 
+        # Track upload tasks and timing
+        upload_tasks: dict[str, TaskID] = {}  # filename -> task_id
+        upload_start_times: dict[str, float] = {}  # filename -> start_time
+        completed_uploads: list[tuple[str, float]] = []  # (filename, duration)
+
+        def file_progress_callback(filename: str, uploaded_bytes: int, total_bytes: int) -> None:
+            """Display upload progress for each file using rich Progress."""
+            if filename not in upload_tasks:
+                task_id = progress.add_task(f"Uploading {filename}", total=total_bytes)
+                upload_tasks[filename] = task_id
+                upload_start_times[filename] = time.time()
+            progress.update(upload_tasks[filename], completed=uploaded_bytes)
+
+            # Hide progress bar when upload is complete
+            if uploaded_bytes >= total_bytes:
+                progress.update(upload_tasks[filename], visible=False)
+                duration = time.time() - upload_start_times.get(filename, time.time())
+                completed_uploads.append((filename, duration))
+
         # Execute parallel upload using AsyncConvertCommand's parallel method
+        upload_start = time.time()
         with progress:
-            overall_task = progress.add_task(
-                "upload",
-                filename=f"Uploading 0/{len(candidates)} files",
-                total=len(candidates),
-            )
-
-            def upload_progress_callback(
-                filename: str, percent: int, current: int, total: int
-            ) -> None:
-                progress.update(
-                    overall_task,
-                    completed=current,
-                    filename=f"Uploading {current}/{total} files",
-                )
-
             result = async_cmd.execute_parallel(
                 candidates=candidates,
                 quality_preset=quality,
                 concurrency_limit=concurrency_limit,
-                progress_callback=upload_progress_callback,
+                file_progress_callback=file_progress_callback,
             )
+        upload_total_time = time.time() - upload_start
 
-            # Complete the progress bar
-            progress.update(overall_task, completed=len(candidates))
+        # Show completion status for each file
+        for filename, duration in completed_uploads:
+            console.print(f"  [green]✓[/green] {filename} ({duration:.1f}s)")
+
+        # Show upload summary
+        successful_count = len(completed_uploads)
+        failed_count = len(candidates) - successful_count
+        console.print()
+        console.print("[bold]Upload Summary[/bold]")
+        console.print(f"  Successful: [green]{successful_count}[/green]")
+        console.print(f"  Failed: [red]{failed_count}[/red]")
+        console.print(f"  Total time: {upload_total_time:.1f}s")
 
         if result.status == "ERROR":
+            console.print()
             console.print(f"[red]✗ Failed: {result.error_message}[/red]")
             sys.exit(1)
 

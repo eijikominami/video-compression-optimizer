@@ -474,6 +474,7 @@ class AsyncConvertCommand:
         user_id: str | None = None,
         concurrency_limit: int = 3,
         progress_callback: Callable[[str, int, int, int], None] | None = None,
+        file_progress_callback: Callable[[str, int, int], None] | None = None,
     ) -> AsyncTaskResult:
         """Submit async conversion task with parallel uploads.
 
@@ -487,7 +488,8 @@ class AsyncConvertCommand:
             quality_preset: Quality preset for conversion
             user_id: User identifier (defaults to machine ID)
             concurrency_limit: Maximum concurrent uploads (1-10)
-            progress_callback: Callback for progress updates (filename, percent, current, total)
+            progress_callback: Callback for overall progress (filename, percent, current, total)
+            file_progress_callback: Callback for per-file byte progress (filename, uploaded_bytes, total_bytes)
 
         Returns:
             AsyncTaskResult with task ID and status
@@ -561,11 +563,21 @@ class AsyncConvertCommand:
                 def upload() -> bool:
                     vid = cand.video
                     try:
-                        # Upload source file (without progress callback for parallel)
+                        # Track cumulative bytes for progress callback
+                        bytes_uploaded = 0
+
+                        def s3_progress_callback(bytes_amount: int) -> None:
+                            nonlocal bytes_uploaded
+                            bytes_uploaded += bytes_amount
+                            if file_progress_callback:
+                                file_progress_callback(vid.filename, bytes_uploaded, vid.file_size)
+
+                        # Upload source file with progress callback
                         self.s3_client.upload_file(
                             str(vid.path),
                             self.s3_bucket,
                             src_key,
+                            Callback=s3_progress_callback if file_progress_callback else None,
                         )
 
                         # Extract and upload metadata
