@@ -112,6 +112,29 @@ PENDING → CONVERTING → COMPLETED → DOWNLOADED
 
 ## 設計判断
 
+### boto3 Lambda Layer（ワークアラウンド）
+
+AsyncWorkflowFunction は MediaConvert の `PerFrameMetrics` パラメータをサポートするためにカスタム boto3 Layer を使用しています。
+
+**背景:**
+- Lambda のデフォルト boto3（~1.28.x）は `PerFrameMetrics` パラメータをサポートしていない
+- `PerFrameMetrics` には boto3 1.34.x 以降が必要
+- この Layer は必要な API サポートのために boto3 1.35+ を提供
+
+**重要:** `async-workflow/requirements.txt` には boto3 を含めないこと。関数コードに boto3 が含まれると、Layer より優先されてしまいます（`/var/task/` が `/opt/python/` より優先）。
+
+**削除タイミング:**
+AWS が Lambda のデフォルト boto3 を 1.34.x 以降に更新した時点で、このワークアラウンドは削除可能です:
+1. `sam-app/template.yaml` から `Boto3Layer` リソースを削除
+2. `AsyncWorkflowFunction` から `Layers` プロパティを削除
+3. `sam-app/layers/boto3/` ディレクトリを削除
+
+**Lambda の boto3 バージョン確認方法:**
+```python
+import boto3
+print(boto3.__version__)
+```
+
 ### Swift ネイティブ実装
 
 iCloud ダウンロードと Photos インポートに Swift PhotoKit を採用した理由:
@@ -135,6 +158,24 @@ iCloud ダウンロードと Photos インポートに Swift PhotoKit を採用�
 | `balanced` | 6-7 | 推奨デフォルト |
 | `balanced+` | 6-7 → 8-9 | アダプティブ（SSIM < 0.95 で high にリトライ） |
 | `compression` | 4-5 | 最大圧縮 |
+
+### MediaConvert エンコード設定
+
+H.265 エンコードは AWS 推奨設定を使用して高品質と効率的な圧縮を実現:
+
+| 設定 | 値 | 目的 |
+|------|-----|------|
+| `QualityTuningLevel` | `MULTI_PASS_HQ` | 2パスエンコードで最適なビットレート配分 |
+| `DynamicSubGop` | `ADAPTIVE` | コンテンツに基づく動的 B フレーム調整 |
+| `GopBReference` | `ENABLED` | B フレーム参照で圧縮効率向上 |
+| `AdaptiveQuantization` | `AUTO` | 自動量子化最適化 |
+| `GopSizeUnits` | `AUTO` | MediaConvert が最適な GOP サイズを自動選択 |
+| `FlickerAdaptiveQuantization` | `ENABLED` | フリッカーアーティファクト軽減 |
+| `SpatialAdaptiveQuantization` | `ENABLED` | 空間的ディテール保持を最適化 |
+| `TemporalAdaptiveQuantization` | `ENABLED` | 時間的一貫性を最適化 |
+| `SampleAdaptiveOffsetFilterMode` | `ADAPTIVE` | バンディングアーティファクト軽減 |
+
+これらの設定は効率的な圧縮を達成しながら品質を優先します。`MULTI_PASS_HQ` モードは最初に動画全体を分析し、シーン間で最適にビットレートを配分します。
 
 ### S3 キー構造
 

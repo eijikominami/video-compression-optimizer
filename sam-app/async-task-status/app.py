@@ -251,12 +251,30 @@ def list_tasks(
     return response.get("Items", [])
 
 
+# Cache MediaConvert endpoint URL at module level
+_mediaconvert_endpoint_url: str | None = None
+
+
 def get_mediaconvert_client():
-    """Get MediaConvert client with endpoint."""
-    mc = boto3.client("mediaconvert")
-    endpoints = mc.describe_endpoints()
-    endpoint_url = endpoints["Endpoints"][0]["Url"]
-    return boto3.client("mediaconvert", endpoint_url=endpoint_url)
+    """Get MediaConvert client with cached endpoint.
+
+    MediaConvert endpoint is account-specific and doesn't change,
+    so we cache it to avoid DescribeEndpoints rate limiting.
+    """
+    global _mediaconvert_endpoint_url
+
+    if _mediaconvert_endpoint_url is None:
+        # Check environment variable first (can be set in SAM template)
+        _mediaconvert_endpoint_url = os.environ.get("MEDIACONVERT_ENDPOINT")
+
+        if not _mediaconvert_endpoint_url:
+            # Fall back to API call (only once per Lambda instance)
+            mc = boto3.client("mediaconvert")
+            endpoints = mc.describe_endpoints()
+            _mediaconvert_endpoint_url = endpoints["Endpoints"][0]["Url"]
+            logger.info(f"Cached MediaConvert endpoint: {_mediaconvert_endpoint_url}")
+
+    return boto3.client("mediaconvert", endpoint_url=_mediaconvert_endpoint_url)
 
 
 def get_mediaconvert_job_progress(job_id: str) -> int:
@@ -443,6 +461,7 @@ def format_task_response(task: dict, include_download_urls: bool = False) -> dic
             body = quality_result.get("body", quality_result)
             formatted_file["quality_result"] = {
                 "ssim_score": body.get("ssim_score"),
+                "vmaf_score": body.get("vmaf_score"),
                 "original_size": body.get("original_size"),
                 "converted_size": body.get("converted_size"),
                 "compression_ratio": body.get("compression_ratio"),

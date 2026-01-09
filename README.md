@@ -96,6 +96,22 @@ vco scan --top-n 10
 vco scan --json
 ```
 
+**Scan Summary Categories**:
+
+| Category | Description |
+|----------|-------------|
+| Total videos | All videos in Photos library |
+| Conversion candidates | Videos using inefficient codecs (H.264, MPEG-2, etc.) |
+| Already optimized | Videos already using efficient codecs (H.265, AV1, VP9) |
+| Professional format | ProRes, DNxHD, CineForm, RAW - skipped (manual review recommended) |
+| Skipped | Videos excluded from conversion (see below) |
+
+**Skipped Reasons**:
+- Duration too short (< 1 second)
+- Image-based codec (JPEG, PNG, GIF - not true video)
+- Unsupported codec by MediaConvert
+- File not accessible
+
 ### Convert
 
 ```bash

@@ -6,8 +6,6 @@ against SSIM and VMAF thresholds.
 Requirements: 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 9.1, 9.2, 9.3
 """
 
-import csv
-import io
 import logging
 import os
 from dataclasses import dataclass
@@ -144,6 +142,18 @@ class QualityMetricsParser:
     def _parse_metrics_csv(self, csv_content: str, metric_name: str) -> tuple[float, float, float]:
         """Parse metrics CSV and extract average, min, max values.
 
+        MediaConvert outputs CSV in the following format:
+        Display_ID,Value
+        0,0.99
+        1,0.98
+        ...
+        Average: 0.97
+        Min: 0.97
+        Max: 0.99
+
+        Note: Summary rows use "Key: Value" format (colon-space separator),
+        not CSV format.
+
         Args:
             csv_content: CSV file content as string
             metric_name: Name of the metric (SSIM or VMAF)
@@ -162,23 +172,23 @@ class QualityMetricsParser:
         max_val = None
 
         try:
-            reader = csv.reader(io.StringIO(csv_content))
-
-            for row in reader:
-                if len(row) < 2:
+            for line in csv_content.strip().split("\n"):
+                line = line.strip()
+                if not line:
                     continue
 
-                display_id = row[0].strip()
-                value_str = row[1].strip()
-
-                if display_id == "Average":
+                # Handle summary rows with "Key: Value" format
+                if line.startswith("Average:"):
+                    value_str = line.split(":", 1)[1].strip()
                     average = float(value_str)
-                elif display_id == "Min":
+                elif line.startswith("Min:"):
+                    value_str = line.split(":", 1)[1].strip()
                     min_val = float(value_str)
-                elif display_id == "Max":
+                elif line.startswith("Max:"):
+                    value_str = line.split(":", 1)[1].strip()
                     max_val = float(value_str)
 
-        except (ValueError, csv.Error) as e:
+        except ValueError as e:
             raise QualityMetricsError(f"Failed to parse {metric_name} CSV: {e}")
 
         if average is None:

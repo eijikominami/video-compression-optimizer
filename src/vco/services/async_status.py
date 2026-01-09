@@ -42,6 +42,7 @@ class FileDetail:
     progress_percentage: int
     error_message: str | None = None
     ssim_score: float | None = None
+    vmaf_score: float | None = None
     original_size_bytes: int | None = None
     output_size_bytes: int | None = None
     output_s3_key: str | None = None
@@ -191,6 +192,7 @@ class StatusCommand:
                         progress_percentage=file_data.get("conversion_progress_percentage", 0),
                         error_message=file_data.get("error_message"),
                         ssim_score=quality_result.get("ssim_score"),
+                        vmaf_score=quality_result.get("vmaf_score"),
                         original_size_bytes=quality_result.get("original_size"),
                         output_size_bytes=file_data.get("output_size_bytes")
                         or quality_result.get("converted_size"),

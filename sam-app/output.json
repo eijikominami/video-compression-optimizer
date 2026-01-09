@@ -1,0 +1,1 @@
+{"errorMessage": "Unknown action: check_boto3_version", "errorType": "ValueError", "requestId": "6519f594-a233-4013-aea9-eeb6246edb16", "stackTrace": ["  File \"/var/task/app.py\", line 723, in lambda_handler\n    raise ValueError(f\"Unknown action: {action}\")\n"]}

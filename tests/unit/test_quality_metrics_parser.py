@@ -26,14 +26,17 @@ class TestQualityMetricsParser:
     """Tests for QualityMetricsParser."""
 
     def test_parse_ssim_csv_valid(self):
-        """Test parsing valid SSIM CSV."""
-        csv_content = """Display_ID,SSIM
+        """Test parsing valid SSIM CSV.
+
+        MediaConvert outputs CSV with "Key: Value" format for summary rows.
+        """
+        csv_content = """Display_ID,Value
 1,0.987654
 2,0.987123
 3,0.988000
-Average,0.987592
-Min,0.987123
-Max,0.988000
+Average: 0.987592
+Min: 0.987123
+Max: 0.988000
 """
         parser = QualityMetricsParser()
         avg, min_val, max_val = parser.parse_ssim_csv(csv_content)
@@ -43,14 +46,17 @@ Max,0.988000
         assert max_val == pytest.approx(0.988000)
 
     def test_parse_vmaf_csv_valid(self):
-        """Test parsing valid VMAF CSV."""
-        csv_content = """Display_ID,VMAF
+        """Test parsing valid VMAF CSV.
+
+        MediaConvert outputs CSV with "Key: Value" format for summary rows.
+        """
+        csv_content = """Display_ID,Value
 1,85.123456
 2,84.987654
 3,86.000000
-Average,85.370370
-Min,84.987654
-Max,86.000000
+Average: 85.370370
+Min: 84.987654
+Max: 86.000000
 """
         parser = QualityMetricsParser()
         avg, min_val, max_val = parser.parse_vmaf_csv(csv_content)
@@ -78,10 +84,10 @@ Max,86.000000
 
     def test_parse_ssim_csv_missing_average(self):
         """Test parsing SSIM CSV without Average raises error."""
-        csv_content = """Display_ID,SSIM
+        csv_content = """Display_ID,Value
 1,0.987654
-Min,0.987123
-Max,0.988000
+Min: 0.987123
+Max: 0.988000
 """
         parser = QualityMetricsParser()
 
@@ -90,10 +96,10 @@ Max,0.988000
 
     def test_parse_ssim_csv_missing_min(self):
         """Test parsing SSIM CSV without Min raises error."""
-        csv_content = """Display_ID,SSIM
+        csv_content = """Display_ID,Value
 1,0.987654
-Average,0.987592
-Max,0.988000
+Average: 0.987592
+Max: 0.988000
 """
         parser = QualityMetricsParser()
 
@@ -102,10 +108,10 @@ Max,0.988000
 
     def test_parse_ssim_csv_missing_max(self):
         """Test parsing SSIM CSV without Max raises error."""
-        csv_content = """Display_ID,SSIM
+        csv_content = """Display_ID,Value
 1,0.987654
-Average,0.987592
-Min,0.987123
+Average: 0.987592
+Min: 0.987123
 """
         parser = QualityMetricsParser()
 
@@ -114,11 +120,11 @@ Min,0.987123
 
     def test_parse_ssim_csv_invalid_value(self):
         """Test parsing SSIM CSV with invalid value raises error."""
-        csv_content = """Display_ID,SSIM
+        csv_content = """Display_ID,Value
 1,0.987654
-Average,not_a_number
-Min,0.987123
-Max,0.988000
+Average: not_a_number
+Min: 0.987123
+Max: 0.988000
 """
         parser = QualityMetricsParser()
 
@@ -127,11 +133,11 @@ Max,0.988000
 
     def test_parse_ssim_csv_clamps_values(self):
         """Test SSIM values are clamped to 0-1 range."""
-        csv_content = """Display_ID,SSIM
+        csv_content = """Display_ID,Value
 1,0.987654
-Average,1.001
-Min,-0.001
-Max,1.5
+Average: 1.001
+Min: -0.001
+Max: 1.5
 """
         parser = QualityMetricsParser()
         avg, min_val, max_val = parser.parse_ssim_csv(csv_content)
@@ -143,11 +149,11 @@ Max,1.5
 
     def test_parse_vmaf_csv_clamps_values(self):
         """Test VMAF values are clamped to 0-100 range."""
-        csv_content = """Display_ID,VMAF
+        csv_content = """Display_ID,Value
 1,85.0
-Average,101.0
-Min,-5.0
-Max,150.0
+Average: 101.0
+Min: -5.0
+Max: 150.0
 """
         parser = QualityMetricsParser()
         avg, min_val, max_val = parser.parse_vmaf_csv(csv_content)
@@ -158,16 +164,13 @@ Max,150.0
         assert max_val == 100.0
 
     def test_parse_csv_with_extra_whitespace(self):
-        """Test parsing CSV with extra whitespace."""
-        # Build CSV with intentional whitespace using explicit strings
-        lines = [
-            "Display_ID,SSIM",
-            "  1  ,  0.987654  ",  # noqa: W291
-            "  Average  ,  0.987592  ",  # noqa: W291
-            "  Min  ,  0.987123  ",  # noqa: W291
-            "  Max  ,  0.988000  ",  # noqa: W291
-        ]
-        csv_content = "\n".join(lines) + "\n"
+        """Test parsing CSV with extra whitespace in summary rows."""
+        csv_content = """Display_ID,Value
+1,0.987654
+Average:   0.987592
+Min:   0.987123
+Max:   0.988000
+"""
         parser = QualityMetricsParser()
         avg, min_val, max_val = parser.parse_ssim_csv(csv_content)
 
@@ -178,10 +181,10 @@ Max,150.0
     def test_parse_csv_with_many_frames(self):
         """Test parsing CSV with many frame entries."""
         # Build CSV with 1000 frames
-        lines = ["Display_ID,SSIM"]
+        lines = ["Display_ID,Value"]
         for i in range(1, 1001):
             lines.append(f"{i},0.98{i % 10}")
-        lines.extend(["Average,0.985000", "Min,0.980000", "Max,0.989000"])
+        lines.extend(["Average: 0.985000", "Min: 0.980000", "Max: 0.989000"])
         csv_content = "\n".join(lines)
 
         parser = QualityMetricsParser()
@@ -190,6 +193,49 @@ Max,150.0
         assert avg == pytest.approx(0.985000)
         assert min_val == pytest.approx(0.980000)
         assert max_val == pytest.approx(0.989000)
+
+    def test_parse_real_mediaconvert_ssim_format(self):
+        """Test parsing actual MediaConvert SSIM CSV format.
+
+        This test uses the exact format observed from MediaConvert output.
+        """
+        csv_content = """Display_ID,Value
+0,0.99
+1,0.98
+2,0.98
+3,0.97
+4,0.98
+Average: 0.97
+Min: 0.97
+Max: 0.99
+"""
+        parser = QualityMetricsParser()
+        avg, min_val, max_val = parser.parse_ssim_csv(csv_content)
+
+        assert avg == pytest.approx(0.97)
+        assert min_val == pytest.approx(0.97)
+        assert max_val == pytest.approx(0.99)
+
+    def test_parse_real_mediaconvert_vmaf_format(self):
+        """Test parsing actual MediaConvert VMAF CSV format.
+
+        This test uses the exact format observed from MediaConvert output.
+        """
+        csv_content = """Display_ID,Value
+0,85.50
+1,84.20
+2,86.10
+3,85.00
+Average: 85.20
+Min: 84.20
+Max: 86.10
+"""
+        parser = QualityMetricsParser()
+        avg, min_val, max_val = parser.parse_vmaf_csv(csv_content)
+
+        assert avg == pytest.approx(85.20)
+        assert min_val == pytest.approx(84.20)
+        assert max_val == pytest.approx(86.10)
 
 
 class TestQualityEvaluator:

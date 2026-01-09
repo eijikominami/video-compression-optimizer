@@ -248,11 +248,10 @@ def create_job_settings(source_key: str, output_key: str, preset: str) -> dict:
                     "Type": "FILE_GROUP_SETTINGS",
                     "FileGroupSettings": {
                         "Destination": f"s3://{S3_BUCKET}/{output_key.rsplit('/', 1)[0]}/",
-                        # Per-frame metrics configuration (Requirements: 1.1, 1.3)
-                        "PerFrameMetrics": {
-                            "FrameMetricType": ["SSIM", "VMAF"],
-                        },
                     },
+                    # Per-frame metrics configuration (Requirements: 1.1, 1.3)
+                    # Must be at OutputGroupSettings level as a list of metric type strings
+                    "PerFrameMetrics": ["SSIM", "VMAF"],
                 },
                 "Outputs": [
                     {
@@ -275,21 +274,23 @@ def create_job_settings(source_key: str, output_key: str, preset: str) -> dict:
                                         "QvbrQualityLevelFineTune": 0,
                                     },
                                     "MaxBitrate": settings["max_bitrate"],
-                                    "GopSize": 90,
-                                    "GopSizeUnits": "FRAMES",
+                                    # GOP settings: let MediaConvert auto-select optimal values
+                                    "GopSizeUnits": "AUTO",
                                     "ParNumerator": 1,
                                     "ParDenominator": 1,
                                     "ParControl": "SPECIFIED",
-                                    "NumberBFramesBetweenReferenceFrames": 3,
+                                    # B-frames: let MediaConvert auto-select optimal count
                                     "NumberReferenceFrames": 3,
                                     "Slices": 1,
                                     "InterlaceMode": "PROGRESSIVE",
                                     "SceneChangeDetect": "ENABLED",
-                                    "MinIInterval": 0,
-                                    "AdaptiveQuantization": "HIGH",
-                                    "FlickerAdaptiveQuantization": "ENABLED",
-                                    "SpatialAdaptiveQuantization": "ENABLED",
-                                    "TemporalAdaptiveQuantization": "ENABLED",
+                                    # Quality optimization settings (AWS recommended)
+                                    "QualityTuningLevel": "MULTI_PASS_HQ",
+                                    "DynamicSubGop": "ADAPTIVE",
+                                    "GopBReference": "ENABLED",
+                                    # AdaptiveQuantization: AUTO lets MediaConvert
+                                    # automatically select optimal quantization settings
+                                    "AdaptiveQuantization": "AUTO",
                                     "UnregisteredSeiTimecode": "DISABLED",
                                     "SampleAdaptiveOffsetFilterMode": "ADAPTIVE",
                                     "WriteMp4PackagingType": "HVC1",
@@ -415,15 +416,23 @@ def check_conversion_status(event: dict) -> dict:
             # Calculate compression metrics
             compression_ratio = original_size / converted_size if converted_size > 0 else 0.0
             space_saved_bytes = original_size - converted_size
+            space_saved_percent = (
+                (space_saved_bytes / original_size * 100) if original_size > 0 else 0.0
+            )
 
             result["quality_result"] = {
                 "passed": evaluation.passed,
                 "ssim_score": evaluation.ssim_score,
                 "vmaf_score": evaluation.vmaf_score,
+                "original_size": original_size,
+                "converted_size": converted_size,
                 "compression_ratio": compression_ratio,
                 "space_saved_bytes": space_saved_bytes,
+                "space_saved_percent": space_saved_percent,
                 "failure_reason": evaluation.failure_reason,
             }
+            # Step Functions expects quality_passed at top level for CheckQualityResult state
+            result["quality_passed"] = evaluation.passed
 
             logger.info(
                 f"Quality evaluation for {file_id}: "
@@ -432,11 +441,10 @@ def check_conversion_status(event: dict) -> dict:
             )
 
         except QualityMetricsError as e:
+            # CSV parse errors should fail immediately, not trigger quality retry
+            # Let Step Functions Catch block handle as system error
             logger.error(f"Quality metrics parsing failed: {e}")
-            result["quality_result"] = {
-                "passed": False,
-                "failure_reason": str(e),
-            }
+            raise
 
     elif status == "ERROR":
         error_code = job.get("ErrorCode", 0)

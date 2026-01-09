@@ -694,6 +694,7 @@ class AwsImportService:
             converted_size=file_detail.output_size_bytes or 0,
             compression_ratio=compression_ratio,
             ssim_score=file_detail.ssim_score or 0.0,
+            vmaf_score=file_detail.vmaf_score or 0.0,
             albums=[],  # Albums not available from AWS
             capture_date=None,  # Capture date not available from AWS
             task_id=task_id,

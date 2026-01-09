@@ -44,7 +44,6 @@ class TestImportAllCommandForceFlag:
         assert "--force" in result.output
 
 
-@pytest.mark.skip(reason="Tests need to be updated to match current implementation")
 class TestImportOriginalDeletion:
     """Tests for import command original video deletion behavior.
 
@@ -148,27 +147,34 @@ class TestImportOriginalDeletion:
 
     @patch("vco.services.unified_import.UnifiedImportService")
     @patch("vco.services.aws_import.AwsImportService")
-    def test_y_flag_only_no_prompt_no_deletion(
+    def test_y_flag_shows_delete_prompt(
         self, mock_aws_service_class, mock_unified_service_class
     ):
-        """AC 5.10: With -y flag but without --delete-original, no prompt and no deletion.
+        """AC 5.10: With -y flag but without --delete-original, delete prompt still shown.
+
+        The -y flag skips the initial proceed confirmation, but delete prompt
+        is always shown unless --delete-original is specified.
 
         Requirements: 5.10
         """
         # Setup mocks
         mock_unified_service = MagicMock()
         mock_unified_service.import_item.return_value = self._create_mock_import_result()
+        mock_unified_service.delete_original_video.return_value = MagicMock(success=True)
         mock_unified_service_class.return_value = mock_unified_service
 
         runner = CliRunner()
+        # -y skips proceed confirmation, but delete prompt still appears
+        # User responds 'n' to delete prompt
         result = runner.invoke(
             cli,
             ["import", "-y", "task-123:file-456"],
+            input="n\n",
         )
 
-        # Check that no delete prompt was shown
-        assert "Delete original video?" not in result.output
-        # Check that reminder message is shown
+        # Check that delete prompt was shown
+        assert "Delete original video?" in result.output
+        # Check that reminder message is shown (user said no)
         assert "Original video remains in Photos library" in result.output
         # Verify import_item was called without delete_original=True
         call_kwargs = mock_unified_service.import_item.call_args.kwargs
@@ -232,7 +238,6 @@ class TestImportOriginalDeletion:
         assert call_kwargs.get("delete_original") is True
 
 
-@pytest.mark.skip(reason="Tests need to be updated to match current implementation")
 class TestImportDeletionResultDisplay:
     """Tests for import command deletion result display.
 
@@ -314,7 +319,7 @@ class TestImportDeletionResultDisplay:
     @patch("vco.services.unified_import.UnifiedImportService")
     @patch("vco.services.aws_import.AwsImportService")
     def test_no_deletion_reminder_message(self, mock_aws_service_class, mock_unified_service_class):
-        """AC 5.8: When not deleting, show reminder message.
+        """AC 5.8: When user declines deletion, show reminder message.
 
         Requirements: 5.8
         """
@@ -324,16 +329,17 @@ class TestImportDeletionResultDisplay:
         mock_unified_service_class.return_value = mock_unified_service
 
         runner = CliRunner()
+        # User responds 'n' to delete prompt
         result = runner.invoke(
             cli,
             ["import", "-y", "task-123:file-456"],
+            input="n\n",
         )
 
         # Check reminder message
         assert "Original video remains in Photos library" in result.output
 
 
-@pytest.mark.skip(reason="Tests need to be updated to match current implementation")
 class TestImportAllDeletion:
     """Tests for import --all command deletion behavior.
 
@@ -455,10 +461,13 @@ class TestImportAllDeletion:
 
     @patch("vco.services.unified_import.UnifiedImportService")
     @patch("vco.services.aws_import.AwsImportService")
-    def test_import_all_y_flag_only_no_deletion(
+    def test_import_all_y_flag_shows_delete_prompt(
         self, mock_aws_service_class, mock_unified_service_class
     ):
-        """AC 5.10: vco import --all -y without --delete-original should not delete.
+        """AC 5.10: vco import --all -y should still show delete prompt.
+
+        The -y flag skips the initial proceed confirmation, but delete prompt
+        is always shown unless --delete-original is specified.
 
         Requirements: 5.10
         """
@@ -466,17 +475,21 @@ class TestImportAllDeletion:
         mock_unified_service = MagicMock()
         mock_unified_service.list_all_importable.return_value = self._create_mock_list_result(2)
         mock_unified_service.import_all.return_value = self._create_mock_batch_result(2, 2, 0)
+        mock_unified_service.delete_original_video.return_value = MagicMock(success=True)
         mock_unified_service_class.return_value = mock_unified_service
 
         runner = CliRunner()
+        # -y skips proceed confirmation, but delete prompt still appears
+        # User responds 'n' to delete prompt
         result = runner.invoke(
             cli,
             ["import", "--all", "-y"],
+            input="n\n",
         )
 
-        # Check that no delete prompt was shown
-        assert "Delete" not in result.output or "original video(s)?" not in result.output
-        # Check that reminder message is shown
+        # Check that delete prompt was shown
+        assert "Delete" in result.output and "original video(s)?" in result.output
+        # Check that reminder message is shown (user said no)
         assert "Original videos remain in Photos library" in result.output
         # Verify delete_original_video was NOT called
         assert not mock_unified_service.delete_original_video.called

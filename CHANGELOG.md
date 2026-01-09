@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MediaConvert エンコード設定の最適化**
+  - `QualityTuningLevel`: `MULTI_PASS_HQ` に変更（2パスエンコードで最適なビットレート配分）
+  - `DynamicSubGop`: `ADAPTIVE` に変更（コンテンツに基づく動的 B フレーム調整）
+  - `GopBReference`: `ENABLED` に変更（B フレーム参照で圧縮効率向上）
+  - `AdaptiveQuantization`: `AUTO` に変更（自動量子化最適化）
+  - `GopSizeUnits`: `AUTO` に変更（MediaConvert が最適な GOP サイズを自動選択）
+  - 固定値（`GopSize`, `NumberBFramesBetweenReferenceFrames`, `MinIInterval`）を削除し、MediaConvert の自動最適化に委任
+
 - **MediaConvert フレームごとのメトリクス機能への移行**
   - Quality Checker Lambda を廃止し、MediaConvert の PerFrameMetrics 機能を使用
   - SSIM に加えて VMAF メトリクスをサポート

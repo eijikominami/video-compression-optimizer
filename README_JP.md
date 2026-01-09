@@ -96,6 +96,22 @@ vco scan --top-n 10
 vco scan --json
 ```
 
+**スキャン結果のカテゴリ**:
+
+| カテゴリ | 説明 |
+|---------|------|
+| Total videos | Photos ライブラリ内の全動画数 |
+| Conversion candidates | 非効率なコーデック（H.264、MPEG-2 等）を使用している動画 |
+| Already optimized | 効率的なコーデック（H.265、AV1、VP9）を使用済みの動画 |
+| Professional format | ProRes、DNxHD、CineForm、RAW - スキップ（手動レビュー推奨） |
+| Skipped | 変換対象外の動画（下記参照） |
+
+**スキップ理由**:
+- Duration too short（1 秒未満）
+- Image-based codec（JPEG、PNG、GIF - 真の動画ではない）
+- MediaConvert 非対応コーデック
+- ファイルにアクセス不可
+
 ### 変換
 
 ```bash

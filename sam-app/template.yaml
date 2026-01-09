@@ -88,6 +88,25 @@ Globals:
         LOG_LEVEL: INFO
 
 Resources:
+  # =============================================================================
+  # Lambda Layers
+  # =============================================================================
+
+  # boto3 Layer for MediaConvert PerFrameMetrics support
+  # Lambda's default boto3 (~1.28.x) doesn't support PerFrameMetrics parameter
+  # This layer provides boto3 1.35+ which includes the required API support
+  Boto3Layer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub 'vco-boto3-layer-${Environment}'
+      Description: boto3 1.35+ for MediaConvert PerFrameMetrics support
+      ContentUri: layers/boto3/
+      CompatibleRuntimes:
+        - python3.11
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.11
+
   # S3 Bucket for video files and quality check results
   VideoStorageBucket:
     Type: AWS::S3::Bucket
@@ -295,6 +314,7 @@ Resources:
         Variables:
           DYNAMODB_TABLE: !Ref AsyncTasksTable
           S3_BUCKET: !Ref VideoStorageBucket
+          MEDIACONVERT_ENDPOINT: !Sub 'https://mediaconvert.${AWS::Region}.amazonaws.com'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AsyncTasksTable
@@ -391,6 +411,8 @@ Resources:
         - x86_64
       MemorySize: 512
       Timeout: 300
+      Layers:
+        - !Ref Boto3Layer
       Environment:
         Variables:
           DYNAMODB_TABLE: !Ref AsyncTasksTable

@@ -112,6 +112,29 @@ Note: Quality evaluation (SSIM/VMAF) is performed as part of the CONVERTING phas
 
 ## Design Decisions
 
+### boto3 Lambda Layer (Workaround)
+
+The AsyncWorkflowFunction uses a custom boto3 Layer to support MediaConvert's `PerFrameMetrics` parameter.
+
+**Background:**
+- Lambda's default boto3 (~1.28.x) doesn't support the `PerFrameMetrics` parameter
+- `PerFrameMetrics` requires boto3 1.34.x or later
+- This Layer provides boto3 1.35+ for the required API support
+
+**Important:** Do not include boto3 in `async-workflow/requirements.txt`. If boto3 is included in the function code, it takes precedence over the Layer (`/var/task/` has higher priority than `/opt/python/`).
+
+**When to Remove:**
+This workaround can be removed when AWS updates Lambda's default boto3 to 1.34.x or later. At that point:
+1. Remove `Boto3Layer` resource from `sam-app/template.yaml`
+2. Remove `Layers` property from `AsyncWorkflowFunction`
+3. Delete `sam-app/layers/boto3/` directory
+
+**Check Lambda's boto3 version:**
+```python
+import boto3
+print(boto3.__version__)
+```
+
 ### Swift Native Implementation
 
 Adopted Swift PhotoKit for iCloud download and Photos import:
@@ -135,6 +158,24 @@ Removed synchronous conversion mode:
 | `balanced` | 6-7 | Recommended default |
 | `balanced+` | 6-7 → 8-9 | Adaptive (retry with high if SSIM < 0.95) |
 | `compression` | 4-5 | Maximum compression |
+
+### MediaConvert Encoding Settings
+
+H.265 encoding is optimized for high quality and efficient compression using AWS recommended settings:
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `QualityTuningLevel` | `MULTI_PASS_HQ` | 2-pass encoding for optimal bitrate allocation |
+| `DynamicSubGop` | `ADAPTIVE` | Dynamic B-frame adjustment based on content |
+| `GopBReference` | `ENABLED` | B-frame reference for better compression |
+| `AdaptiveQuantization` | `AUTO` | Automatic quantization optimization |
+| `GopSizeUnits` | `AUTO` | MediaConvert auto-selects optimal GOP size |
+| `FlickerAdaptiveQuantization` | `ENABLED` | Reduces flicker artifacts |
+| `SpatialAdaptiveQuantization` | `ENABLED` | Optimizes spatial detail preservation |
+| `TemporalAdaptiveQuantization` | `ENABLED` | Optimizes temporal consistency |
+| `SampleAdaptiveOffsetFilterMode` | `ADAPTIVE` | Reduces banding artifacts |
+
+These settings prioritize quality while achieving efficient compression. The `MULTI_PASS_HQ` mode analyzes the entire video first to allocate bitrate optimally across scenes.
 
 ### S3 Key Structure
 
