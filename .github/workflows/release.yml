@@ -28,6 +28,12 @@ jobs:
         run: |
           pip install -e ".[dev]"
 
+      - name: Build Swift binary
+        run: |
+          cd swift && swift build -c release
+          mkdir -p ../bin
+          cp .build/release/vco-photos ../bin/
+
       - name: Run unit tests
         run: |
           pytest tests/unit/ -v --cov=src/vco --cov-report=term
