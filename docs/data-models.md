@@ -70,9 +70,9 @@ Video Compression Optimizer (VCO) のデータモデル仕様を定義します�
       "file_id": "f1",
       "filename": "video1.mp4",
       "status": "COMPLETED",
-      "source_s3_key": "async/task123/input/f1/video1.mp4",
+      "source_s3_key": "tasks/task123/source/f1/video1.mp4",
       "output_s3_key": "output/task123/f1/video1_h265.mp4",
-      "metadata_s3_key": "async/task123/input/f1/metadata.json"
+      "metadata_s3_key": "tasks/task123/metadata/f1/video1.mp4.json"
     }
   ],
   "progress_percentage": 50,
@@ -89,14 +89,14 @@ Video Compression Optimizer (VCO) のデータモデル仕様を定義します�
 #### キー構造
 
 ```
-async/{task_id}/input/{file_id}/{filename}        # ソースファイル
-async/{task_id}/input/{file_id}/metadata.json     # メタデータ JSON
-output/{task_id}/{file_id}/{stem}_h265.mp4        # 変換済みファイル
+tasks/{task_id}/source/{file_id}/{filename}           # ソースファイル
+tasks/{task_id}/metadata/{file_id}/{filename}.json    # メタデータ JSON
+output/{task_id}/{file_id}/{stem}_h265.mp4            # 変換済みファイル
 ```
 
 #### メタデータ JSON 形式
 
-**パス**: `async/{task_id}/input/{file_id}/metadata.json`
+**パス**: `tasks/{task_id}/metadata/{file_id}/{filename}.json`
 
 ```json
 {
@@ -126,14 +126,16 @@ API リクエスト/レスポンスの詳細は [API 仕様書](api-specificatio
 
 ファイル処理状態を表す列挙型。DynamoDB、API、Python モデルで共通。
 
-| 値 | 説明 |
-|-----|------|
-| `PENDING` | 処理待ち |
-| `CONVERTING` | MediaConvert 変換中 |
-| `COMPLETED` | 完了、ダウンロード可能 |
-| `DOWNLOADED` | ダウンロード済み |
-| `REMOVED` | ユーザーにより削除 |
-| `FAILED` | 処理失敗 |
+| 値 | 説明 | Python Enum |
+|-----|------|-------------|
+| `PENDING` | 処理待ち | ○ |
+| `CONVERTING` | MediaConvert 変換中（品質評価含む） | ○ |
+| `COMPLETED` | 完了、ダウンロード可能 | ○ |
+| `DOWNLOADED` | ダウンロード済み | ○ |
+| `FAILED` | 処理失敗 | ○ |
+| `REMOVED` | ユーザーにより削除（API のみ） | - |
+
+Note: `REMOVED` は API レスポンスでのみ使用され、Python の `FileStatus` Enum には含まれません。`VERIFYING` ステータスは削除されました（品質評価は `CONVERTING` フェーズで実行）。
 
 ### 進捗計算ロジック
 
@@ -335,6 +337,7 @@ def video_info_to_conversion_result(video: VideoInfo, success: bool = False, err
 
 | バージョン | 日付 | 変更内容 |
 |-----------|------|---------|
+| 1.5.0 | 2026-01-10 | S3 キー構造を ARCHITECTURE.md と統一（`async/` → `tasks/`）、FileStatus テーブルに Python Enum 対応状況を追加 |
 | 1.4.0 | 2026-01-07 | VERIFYING ステータス削除、verification_progress 削除、quality_result に vmaf_score 追加、進捗計算ロジック簡素化 |
 | 1.3.0 | 2026-01-06 | ドキュメント構成をリファクタリング（データストア → API → 実装の順序に変更） |
 | 1.2.0 | 2026-01-05 | VideoMetadata に original_uuid, original_filename フィールド追加 |

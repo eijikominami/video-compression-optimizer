@@ -382,7 +382,7 @@ components:
           description: Task ID
         status:
           type: string
-          enum: [PENDING, UPLOADING, CONVERTING, VERIFYING, COMPLETED, PARTIALLY_COMPLETED, FAILED, CANCELLED]
+          enum: [PENDING, UPLOADING, CONVERTING, COMPLETED, PARTIALLY_COMPLETED, FAILED, CANCELLED]
           description: Overall task status
         quality_preset:
           type: string
@@ -395,7 +395,7 @@ components:
           description: Overall progress (calculated from file statuses)
         current_step:
           type: string
-          enum: [pending, converting, verifying, completed]
+          enum: [pending, converting, completed]
           description: Current processing step
         files:
           type: array
@@ -428,16 +428,18 @@ components:
           description: Original filename
         status:
           type: string
-          enum: [PENDING, CONVERTING, VERIFYING, COMPLETED, DOWNLOADED, REMOVED, FAILED]
+          enum: [PENDING, CONVERTING, COMPLETED, DOWNLOADED, REMOVED, FAILED]
           description: |
             File processing status:
             - PENDING: Waiting to start
-            - CONVERTING: MediaConvert job running
-            - VERIFYING: SSIM quality check running
+            - CONVERTING: MediaConvert job running (includes quality evaluation)
             - COMPLETED: Successfully processed, available for download
             - DOWNLOADED: File has been downloaded by user
             - REMOVED: File has been removed by user
             - FAILED: Processing failed
+            Note: VERIFYING status was removed. Quality evaluation (SSIM/VMAF) 
+            is now performed as part of the CONVERTING phase using MediaConvert 
+            per-frame metrics.
         conversion_progress_percentage:
           type: integer
           minimum: 0
@@ -633,9 +635,12 @@ Tasks are stored with the following structure:
 ### File Status Transitions
 
 ```
-PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
-                                 ↘ FAILED     ↘ REMOVED
+PENDING → CONVERTING → COMPLETED → DOWNLOADED
+                    ↘ FAILED     ↘ REMOVED
 ```
+
+Note: VERIFYING status was removed. Quality evaluation (SSIM/VMAF) is now performed 
+as part of the CONVERTING phase using MediaConvert per-frame metrics.
 
 - `COMPLETED`: File is ready for download
 - `DOWNLOADED`: File has been downloaded by user (excluded from `import --list`)
@@ -643,6 +648,11 @@ PENDING → CONVERTING → VERIFYING → COMPLETED → DOWNLOADED
 
 ## Changelog
 
+- **v1.4.0**: Removed VERIFYING status
+  - Removed `VERIFYING` from FileStatus and TaskStatus enums
+  - Removed `verifying` from current_step enum
+  - Quality evaluation (SSIM/VMAF) is now performed as part of CONVERTING phase
+  - Uses MediaConvert per-frame metrics instead of separate Lambda function
 - **v1.3.0**: Added metadata_s3_key to FileStatus
   - Added `metadata_s3_key` field to FileStatus schema
   - Returns S3 key for metadata JSON file (e.g., `async/{task_id}/input/{file_id}/metadata.json`)

@@ -734,6 +734,19 @@ def import_cmd(
                 f"  Metadata mismatch: [yellow]{batch_result.metadata_mismatch_count}[/yellow]"
             )
 
+        # Show exiftool warning if any metadata embedding was skipped
+        embed_skipped_results = [
+            r for r in batch_result.results if r.embed_result and r.embed_result.skipped
+        ]
+        if embed_skipped_results:
+            console.print()
+            # Show warning once (all will have same reason - exiftool not installed)
+            first_skip = embed_skipped_results[0]
+            console.print(
+                f"[yellow]⚠ Metadata embedding skipped for {len(embed_skipped_results)} file(s): "
+                f"{first_skip.embed_result.error_message}[/yellow]"
+            )
+
         if batch_result.local_total > 0 or batch_result.aws_total > 0:
             console.print()
             console.print("[dim]Breakdown:[/dim]")
@@ -1037,6 +1050,13 @@ def import_cmd(
                 console.print("[green]✓ Downloaded from S3[/green]")
             if import_result.s3_deleted:
                 console.print("[green]✓ S3 file deleted[/green]")
+
+        # Show exiftool warning if metadata embedding was skipped
+        if import_result.embed_result and import_result.embed_result.skipped:
+            console.print()
+            console.print(
+                f"[yellow]⚠ Metadata embedding skipped: {import_result.embed_result.error_message}[/yellow]"
+            )
 
         # Show metadata verification result
         if import_result.metadata_verified:

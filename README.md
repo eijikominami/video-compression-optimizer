@@ -2,6 +2,10 @@ English / [**日本語**](README_JP.md)
 
 # Video Compression Optimizer (VCO)
 
+[![Build](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/test.yml/badge.svg)](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/test.yml)
+[![Release](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/release.yml/badge.svg)](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/release.yml)
+[![Release Version](https://img.shields.io/github/v/release/eijikominami/video-compression-optimizer)](https://github.com/eijikominami/video-compression-optimizer/releases)
+[![codecov](https://codecov.io/gh/eijikominami/video-compression-optimizer/branch/main/graph/badge.svg)](https://codecov.io/gh/eijikominami/video-compression-optimizer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 
@@ -31,6 +35,23 @@ brew install exiftool
 
 ## Installation
 
+### 1. Download Swift Binary
+
+Download the pre-built Universal Binary from [GitHub Releases](https://github.com/eijikominami/video-compression-optimizer/releases):
+
+```bash
+# Create bin directory
+mkdir -p bin
+
+# Download latest release
+curl -sL $(curl -s https://api.github.com/repos/eijikominami/video-compression-optimizer/releases/latest | grep browser_download_url | cut -d '"' -f 4) -o bin/vco-photos
+chmod +x bin/vco-photos
+```
+
+Or build from source (see [Development](#development) section).
+
+### 2. Install Python Package
+
 ```bash
 pip install .
 ```
@@ -43,30 +64,7 @@ pip install -e ".[dev]"
 
 ## AWS Infrastructure Deployment
 
-### 1. Create FFmpeg Lambda Layer
-
-The quality check Lambda function requires FFmpeg. Create a Lambda Layer with the following script:
-
-```bash
-cd sam-app/scripts
-
-# Create and deploy Layer
-./create-ffmpeg-layer.sh \
-  --bucket <your-s3-bucket> \
-  --profile <your-aws-profile> \
-  --region ap-northeast-1
-
-# Dry-run mode (create ZIP only, no deployment)
-./create-ffmpeg-layer.sh --dry-run
-```
-
-The script performs:
-1. Download FFmpeg static build
-2. Create ZIP for Lambda Layer
-3. Upload to S3
-4. Publish Lambda Layer
-
-### 2. Deploy SAM Template
+Deploy the SAM template:
 
 ```bash
 cd sam-app
@@ -156,46 +154,45 @@ vco status <task-id>          # Show task details
 vco cancel <task-id>
 
 # Import completed files
-vco import --list             # List all importable items (local + AWS)
+vco import --list             # List all importable items
 vco import --all              # Import all items
-vco import <task-id:file-id>  # Import specific AWS file
+vco import <task-id:file-id>  # Import specific file
 vco import --delete-original <task-id:file-id>  # Import and delete original
 vco import --force <task-id:file-id>  # Import even if metadata verification fails
 ```
 
 ### Import
 
-Import converted videos from both local queue and AWS completed tasks:
+Import converted videos from AWS completed tasks:
 
 ```bash
-# Show import queue (local + AWS)
+# Show import queue
 vco import --list
 
 # Import specified video to Photos
-vco import <item-id>          # Local: review-id, AWS: task-id:file-id
+vco import <item-id>          # Format: task-id:file-id
 
 # Import and automatically delete original video
 vco import --delete-original <item-id>
 
-# Batch import all videos (local + AWS)
+# Batch import all videos
 vco import --all
 
 # Skip confirmation prompts
 vco import -y <item-id>
 vco import -y --all
 
-# Remove specified ID from queue (also deletes files)
+# Remove specified ID from queue (also deletes S3 files)
 vco import --remove <item-id>
 
 # Force import even if metadata verification fails
 vco import --force <item-id>
 
-# Clear local review queue only (also deletes files)
+# Clear all items from queue (also deletes S3 files)
 vco import --clear
 ```
 
 **Item ID formats**:
-- Local items: `abc123` (review ID)
 - AWS items: `task-uuid:file-uuid` (task:file format)
 
 **Options**:
@@ -204,8 +201,7 @@ vco import --clear
 - `-y, --yes`: Skip confirmation prompts
 
 **Note**: 
-- The `--remove` and `--clear` options delete both the queue entry and the corresponding converted video and metadata files.
-- `--clear` only affects local queue; AWS items remain in S3.
+- The `--remove` and `--clear` options delete both the queue entry and the corresponding S3 files.
 - Without `--delete-original`, you need to manually delete original videos in Photos app after import.
 - Metadata verification checks capture date (±1 second tolerance) and GPS location (±0.0001 degrees tolerance) before import. Use `--force` to bypass verification failures.
 - If capture date is within ±1 hour of processing time, a warning is displayed but import continues.
@@ -311,21 +307,37 @@ The CLI automatically detects your system locale:
 
 ## Development
 
+### Initial Setup
+
+After cloning the repository, build the Swift binary:
+
+```bash
+cd swift
+./build_swift.sh --release
+cp bin/vco-photos ../bin/
+cd ..
+pip install -e ".[dev]"
+```
+
 ### Building Swift Binary
 
-For development, you can build the Swift binary manually:
+For development, you can build the Swift binary locally:
 
 ```bash
 cd swift
 
-# Build for current architecture
-swift build
+# Build Universal Binary (arm64 + x86_64) - recommended
+./build_swift.sh --release
 
-# Build Universal Binary (arm64 + x86_64)
-./scripts/build_swift.sh
+# Or build for current architecture only (faster)
+swift build -c release
 ```
 
-The built binary is placed in `bin/vco-photos`.
+The built binary is placed in `swift/bin/vco-photos`. Copy it to the project root:
+
+```bash
+cp swift/bin/vco-photos ../bin/vco-photos
+```
 
 ### Running Tests
 

@@ -2,6 +2,10 @@
 
 # Video Compression Optimizer (VCO)
 
+[![Build](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/test.yml/badge.svg)](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/test.yml)
+[![Release](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/release.yml/badge.svg)](https://github.com/eijikominami/video-compression-optimizer/actions/workflows/release.yml)
+[![Release Version](https://img.shields.io/github/v/release/eijikominami/video-compression-optimizer)](https://github.com/eijikominami/video-compression-optimizer/releases)
+[![codecov](https://codecov.io/gh/eijikominami/video-compression-optimizer/branch/main/graph/badge.svg)](https://codecov.io/gh/eijikominami/video-compression-optimizer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 
@@ -31,6 +35,23 @@ brew install exiftool
 
 ## インストール
 
+### 1. Swift バイナリのダウンロード
+
+[GitHub Releases](https://github.com/eijikominami/video-compression-optimizer/releases) からビルド済み Universal Binary をダウンロードします：
+
+```bash
+# bin ディレクトリを作成
+mkdir -p bin
+
+# 最新リリースをダウンロード
+curl -sL $(curl -s https://api.github.com/repos/eijikominami/video-compression-optimizer/releases/latest | grep browser_download_url | cut -d '"' -f 4) -o bin/vco-photos
+chmod +x bin/vco-photos
+```
+
+または、ソースからビルドすることもできます（[開発](#開発)セクション参照）。
+
+### 2. Python パッケージのインストール
+
 ```bash
 pip install .
 ```
@@ -43,30 +64,7 @@ pip install -e ".[dev]"
 
 ## AWS インフラストラクチャのデプロイ
 
-### 1. FFmpeg Lambda Layer の作成
-
-品質チェック Lambda 関数には FFmpeg が必要です。以下のスクリプトで Lambda Layer を作成します：
-
-```bash
-cd sam-app/scripts
-
-# Layer を作成してデプロイ
-./create-ffmpeg-layer.sh \
-  --bucket <your-s3-bucket> \
-  --profile <your-aws-profile> \
-  --region ap-northeast-1
-
-# dry-run モード（ZIP 作成のみ、デプロイなし）
-./create-ffmpeg-layer.sh --dry-run
-```
-
-スクリプトは以下を実行します：
-1. FFmpeg 静的ビルドをダウンロード
-2. Lambda Layer 用の ZIP を作成
-3. S3 にアップロード
-4. Lambda Layer を発行
-
-### 2. SAM テンプレートのデプロイ
+SAM テンプレートをデプロイします：
 
 ```bash
 cd sam-app
@@ -108,7 +106,7 @@ vco scan --json
 
 **スキップ理由**:
 - Duration too short（1 秒未満）
-- Image-based codec（JPEG、PNG、GIF - 真の動画ではない）
+- Image-based codec（JPEG、PNG、GIF - 動画ではない）
 - MediaConvert 非対応コーデック
 - ファイルにアクセス不可
 
@@ -156,46 +154,45 @@ vco status <task-id>          # タスク詳細を表示
 vco cancel <task-id>
 
 # 完了したファイルをインポート
-vco import --list             # インポート可能なアイテム一覧（ローカル + AWS）
+vco import --list             # インポート可能なアイテム一覧
 vco import --all              # 全アイテムをインポート
-vco import <task-id:file-id>  # 特定の AWS ファイルをインポート
+vco import <task-id:file-id>  # 特定のファイルをインポート
 vco import --delete-original <task-id:file-id>  # インポート後にオリジナルを削除
 vco import --force <task-id:file-id>  # メタデータ検証失敗時も強制インポート
 ```
 
 ### インポート
 
-ローカルキューと AWS 完了タスクの両方から変換済み動画をインポートします：
+AWS 完了タスクから変換済み動画をインポートします：
 
 ```bash
-# インポート待ちの一覧を表示（ローカル + AWS）
+# インポート待ちの一覧を表示
 vco import --list
 
 # 指定した動画を Photos にインポート
-vco import <item-id>          # ローカル: review-id, AWS: task-id:file-id
+vco import <item-id>          # 形式: task-id:file-id
 
 # インポート後にオリジナル動画を自動削除
 vco import --delete-original <item-id>
 
-# 全ての動画を一括インポート（ローカル + AWS）
+# 全ての動画を一括インポート
 vco import --all
 
 # 確認プロンプトをスキップ
 vco import -y <item-id>
 vco import -y --all
 
-# 指定した ID をキューから削除（ファイルも削除）
+# 指定した ID をキューから削除（S3 ファイルも削除）
 vco import --remove <item-id>
 
 # メタデータ検証失敗時も強制インポート
 vco import --force <item-id>
 
-# ローカルレビューキューのみクリア（ファイルも削除）
+# 全アイテムをキューからクリア（S3 ファイルも削除）
 vco import --clear
 ```
 
 **Item ID 形式**:
-- ローカルアイテム: `abc123`（review ID）
 - AWS アイテム: `task-uuid:file-uuid`（task:file 形式）
 
 **オプション**:
@@ -204,8 +201,7 @@ vco import --clear
 - `-y, --yes`: 確認プロンプトをスキップ
 
 **注意**: 
-- `--remove` と `--clear` オプションは、キューからの削除と同時に対応するファイルも削除します。
-- `--clear` はローカルキューのみに影響し、AWS アイテムは S3 に残ります。
+- `--remove` と `--clear` オプションは、キューからの削除と同時に対応する S3 ファイルも削除します。
 - `--delete-original` を指定しない場合、インポート後にオリジナル動画を Photos アプリで手動削除する必要があります。
 - メタデータ検証はインポート前に撮影日時（±1 秒許容）と GPS 位置情報（±0.0001 度許容）をチェックします。検証失敗時は `--force` でバイパス可能です。
 - 撮影日時が処理時刻の ±1 時間以内の場合、警告が表示されますがインポートは続行されます。
@@ -311,21 +307,37 @@ CLI はシステムロケールを自動検出します：
 
 ## 開発
 
+### 初回セットアップ
+
+リポジトリをクローンした後、Swift バイナリをビルドします：
+
+```bash
+cd swift
+./build_swift.sh --release
+cp bin/vco-photos ../bin/
+cd ..
+pip install -e ".[dev]"
+```
+
 ### Swift バイナリのビルド
 
-開発時は Swift バイナリを手動でビルドできます：
+開発時は Swift バイナリをローカルでビルドできます：
 
 ```bash
 cd swift
 
-# 現在のアーキテクチャ用にビルド
-swift build
+# Universal Binary をビルド（arm64 + x86_64）- 推奨
+./build_swift.sh --release
 
-# Universal Binary をビルド（arm64 + x86_64）
-./scripts/build_swift.sh
+# または現在のアーキテクチャのみビルド（高速）
+swift build -c release
 ```
 
-ビルドされたバイナリは `bin/vco-photos` に配置されます。
+ビルドされたバイナリは `swift/bin/vco-photos` に配置されます。プロジェクトルートにコピーします：
+
+```bash
+cp swift/bin/vco-photos ../bin/vco-photos
+```
 
 ### テスト実行
 

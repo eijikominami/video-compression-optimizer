@@ -44,6 +44,10 @@ htmlcov/
 # Swift
 swift/.build/
 swift/.swiftpm/
+swift/bin/
+
+# Built binaries (download from GitHub Release)
+bin/vco-photos
 
 # SAM
 .aws-sam/
