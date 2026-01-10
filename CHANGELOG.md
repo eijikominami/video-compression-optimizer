@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Ctrl+C による転送のグレースフルキャンセル
   - 一部失敗時も残りの転送を継続
 
+### Removed
+
+- **FFmpeg Lambda Layer スクリプトを削除**
+  - `sam-app/scripts/create-ffmpeg-layer.sh` を削除（品質チェックは MediaConvert PerFrameMetrics に移行済み）
+  - README から FFmpeg Lambda Layer 作成手順を削除
+
+- **README からローカルキューの記述を削除**
+  - ローカルレビューキュー機能は実装されていないため、関連する記述を削除
+  - Item ID 形式を AWS アイテムのみに更新
+
+### Changed
+
+- **Swift バイナリをリポジトリから削除**
+  - `bin/vco-photos` を `.gitignore` に追加
+  - GitHub Release から Universal Binary をダウンロードする形式に変更
+  - CI で Swift バイナリをビルド・添付する `release.yml` を追加
+
 ## [0.2.0] - 2026-01-09
 
 ### Changed
