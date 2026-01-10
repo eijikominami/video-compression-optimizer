@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-01-10
 
 ### Added
 
@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rich Progress による全体進捗表示（"Downloading 3/10 files"）
   - Ctrl+C による転送のグレースフルキャンセル
   - 一部失敗時も残りの転送を継続
+
+- **CI/CD 自動化**
+  - GitHub Actions による自動リリースワークフロー
+  - Swift Universal Binary (arm64 + x86_64) を CI でビルド・添付
+  - Codecov によるカバレッジレポート
 
 ### Removed
 
