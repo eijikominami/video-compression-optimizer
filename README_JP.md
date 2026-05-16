@@ -365,6 +365,33 @@ ruff check src/ tests/
 mypy src/
 ```
 
+## メニューバーアプリ (macOS)
+
+macOS メニューバーに常駐し、`scan → convert → polling → import` パイプラインをワンクリックで全自動実行するネイティブアプリ。
+
+### ビルド & 実行
+
+```bash
+cd VCOMenuBar
+swift build
+swift test
+```
+
+### 機能
+
+- メニューバーからワンクリックでパイプライン実行
+- リアルタイムステータス表示（ファイルごとの進捗）
+- AWS 変換完了の自動ポーリング
+- エラーリカバリ（ディスク容量リトライ、認証期限切れ通知）
+- アプリ再起動後の状態復元
+- macOS 通知によるイベント通知
+
+### 要件
+
+- macOS 13.0（Ventura）以降
+- `vco` CLI がインストール済みで PATH に存在すること
+- `~/.config/vco/config.json` が設定済みであること
+
 ## ライセンス
 
 MIT License
