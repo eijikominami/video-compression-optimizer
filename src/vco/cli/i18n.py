@@ -110,6 +110,10 @@ HELP_MESSAGES: dict[str, dict[Locale, str]] = {
         "ja": "確認プロンプトをスキップ",
         "en": "Skip confirmation prompts",
     },
+    "convert.json": {
+        "ja": "JSON形式で出力",
+        "en": "Output in JSON format",
+    },
     # import command
     "import.description": {
         "ja": "変換済み動画を Photos ライブラリにインポート\n\n"

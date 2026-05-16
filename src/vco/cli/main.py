@@ -11,6 +11,7 @@ Usage:
 """
 
 import json
+import signal
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -26,6 +27,18 @@ from vco.photos.manager import PhotosAccessManager
 from vco.services.scan import ScanService
 
 console = Console()
+
+
+# Flag to track if we're handling an interrupt
+_interrupted = False
+
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT gracefully without traceback."""
+    global _interrupted
+    _interrupted = True
+    # Raise KeyboardInterrupt to trigger normal exception handling
+    raise KeyboardInterrupt()
 
 
 def utc_to_local(utc_dt: datetime) -> datetime:
@@ -220,6 +233,7 @@ scan.help = get_help("scan.description")
     default=3,
     help="Number of concurrent transfers (1-10, default: 3)",
 )
+@click.option("--json", "output_json", is_flag=True, help=get_help("convert.json"))
 @click.option("--yes", "-y", is_flag=True, help=get_help("convert.yes"))
 @click.pass_context
 def convert(
@@ -230,6 +244,7 @@ def convert(
     skip_icloud: bool,
     download_timeout: int | None,
     parallel: int,
+    output_json: bool,
     yes: bool,
 ):
     """Convert candidate videos to H.265."""
@@ -350,7 +365,15 @@ def convert(
         sys.exit(1)
 
     # Execute async conversion (skip_confirm=True since we already confirmed)
-    _convert_async_parallel(ctx, final_candidates, quality, aws_config, parallel, skip_confirm=True)
+    _convert_async_parallel(
+        ctx,
+        final_candidates,
+        quality,
+        aws_config,
+        parallel,
+        skip_confirm=True,
+        output_json=output_json,
+    )
 
 
 # Override convert help text dynamically based on locale
@@ -711,6 +734,8 @@ def import_cmd(
                                 "s3_deleted": r.s3_deleted,
                                 "metadata_verified": r.metadata_verified,
                                 "metadata_mismatch": r.metadata_mismatch,
+                                "original_deleted": r.original_deleted,
+                                "original_delete_error": r.original_delete_error,
                             }
                             for r in batch_result.results
                         ],
@@ -1034,6 +1059,8 @@ def import_cmd(
                     "s3_deleted": import_result.s3_deleted,
                     "metadata_verified": import_result.metadata_verified,
                     "metadata_mismatch": import_result.metadata_mismatch,
+                    "original_deleted": import_result.original_deleted,
+                    "original_delete_error": import_result.original_delete_error,
                     "verification_result": import_result.verification_result.to_dict()
                     if import_result.verification_result
                     else None,
@@ -1542,7 +1569,13 @@ def _download_icloud_videos_parallel(
 
 
 def _convert_async_parallel(
-    ctx, candidates, quality: str, aws_config, concurrency_limit: int, skip_confirm: bool = False
+    ctx,
+    candidates,
+    quality: str,
+    aws_config,
+    concurrency_limit: int,
+    skip_confirm: bool = False,
+    output_json: bool = False,
 ):
     """Handle async conversion mode with parallel uploads."""
     import time
@@ -1636,9 +1669,33 @@ def _convert_async_parallel(
         console.print(f"  Total time: {upload_total_time:.1f}s")
 
         if result.status == "ERROR":
+            if output_json:
+                click.echo(
+                    json.dumps(
+                        {
+                            "task_id": None,
+                            "file_count": 0,
+                            "status": "error",
+                            "error_message": result.error_message,
+                        }
+                    )
+                )
+                sys.exit(1)
             console.print()
             console.print(f"[red]✗ Failed: {result.error_message}[/red]")
             sys.exit(1)
+
+        if output_json:
+            click.echo(
+                json.dumps(
+                    {
+                        "task_id": result.task_id,
+                        "file_count": result.file_count,
+                        "status": "submitted",
+                    }
+                )
+            )
+            return
 
         console.print()
         console.print("[green]✓ Task submitted successfully[/green]")
@@ -1649,6 +1706,13 @@ def _convert_async_parallel(
         console.print(f"[dim]Use 'vco status {result.task_id}' for details[/dim]")
 
     except Exception as e:
+        if output_json:
+            click.echo(
+                json.dumps(
+                    {"task_id": None, "file_count": 0, "status": "error", "error_message": str(e)}
+                )
+            )
+            sys.exit(1)
         console.print(f"[red]✗ Failed to submit task: {e}[/red]")
         sys.exit(1)
 
@@ -1977,11 +2041,17 @@ def _format_status(status: str) -> str:
 
 def main():
     """Entry point for the CLI."""
+    # Install signal handler to suppress traceback on Ctrl+C
+    signal.signal(signal.SIGINT, _signal_handler)
+
     try:
         cli(obj={})
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, click.Abort):
         console.print("\n[yellow]Cancelled.[/yellow]")
-        sys.exit(130)
+        # Use os._exit to avoid ThreadPoolExecutor shutdown traceback
+        import os
+
+        os._exit(130)
 
 
 if __name__ == "__main__":
