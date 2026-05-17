@@ -4,7 +4,7 @@ import Foundation
 public struct ImportCommand {
     
     /// Execute the import command.
-    /// - Parameter args: Command arguments (path required, album_names optional)
+    /// - Parameter args: Command arguments (path required, album_names optional, capture_date optional)
     /// - Returns: CommandResponse with imported video's localIdentifier
     public static func execute(args: CommandArgs) async -> CommandResponse<String> {
         guard let path = args.path else {
@@ -13,10 +13,24 @@ public struct ImportCommand {
         
         let fileURL = URL(fileURLWithPath: path)
         
+        // Parse capture_date if provided (ISO 8601 format)
+        var captureDate: Date? = nil
+        if let captureDateStr = args.captureDate {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            captureDate = formatter.date(from: captureDateStr)
+            if captureDate == nil {
+                // Try without fractional seconds
+                formatter.formatOptions = [.withInternetDateTime]
+                captureDate = formatter.date(from: captureDateStr)
+            }
+        }
+        
         do {
             let localIdentifier = try await VideoImporter.shared.importVideo(
                 from: fileURL,
-                albumNames: args.albumNames
+                albumNames: args.albumNames,
+                captureDate: captureDate
             )
             return CommandResponse.success(localIdentifier)
         } catch let error as PhotosError {

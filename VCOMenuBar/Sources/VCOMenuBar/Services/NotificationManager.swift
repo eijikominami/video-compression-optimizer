@@ -2,8 +2,16 @@ import Foundation
 import UserNotifications
 
 class NotificationManager {
+    private var center: UNUserNotificationCenter?
+
+    init() {
+        if Bundle.main.bundleIdentifier != nil {
+            center = UNUserNotificationCenter.current()
+        }
+    }
+
     func requestPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     func sendPipelineComplete(successful: Int, failed: Int) {
@@ -27,6 +35,7 @@ class NotificationManager {
     }
 
     private func send(title: String, body: String) {
+        guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -35,6 +44,6 @@ class NotificationManager {
             identifier: UUID().uuidString, content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        center.add(request)
     }
 }

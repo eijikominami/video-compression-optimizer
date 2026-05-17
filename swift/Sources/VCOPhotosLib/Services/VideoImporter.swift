@@ -16,8 +16,9 @@ public class VideoImporter {
     /// - Parameters:
     ///   - fileURL: URL to the video file to import
     ///   - albumNames: Optional array of album names to add the video to
+    ///   - captureDate: Optional capture date to set as the asset's creation date
     /// - Returns: The localIdentifier of the imported video
-    public func importVideo(from fileURL: URL, albumNames: [String]? = nil) async throws -> String {
+    public func importVideo(from fileURL: URL, albumNames: [String]? = nil, captureDate: Date? = nil) async throws -> String {
         // Request write authorization
         _ = try await PhotosManager.shared.requestWriteAuthorization()
         
@@ -32,6 +33,10 @@ public class VideoImporter {
         try await PHPhotoLibrary.shared().performChanges {
             let creationRequest = PHAssetCreationRequest.forAsset()
             creationRequest.addResource(with: .video, fileURL: fileURL, options: nil)
+            // Set capture date so Photos uses the original date, not import time
+            if let captureDate = captureDate {
+                creationRequest.creationDate = captureDate
+            }
             localIdentifier = creationRequest.placeholderForCreatedAsset?.localIdentifier
         }
         

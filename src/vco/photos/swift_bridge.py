@@ -5,8 +5,10 @@ which uses native PhotoKit APIs for faster and more reliable Photos access.
 """
 
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -78,13 +80,35 @@ class SwiftBridge:
 
         raise PhotosAccessError("vco-photos binary not found. Build with: cd swift && swift build")
 
+    def _get_app_bundle(self) -> Path:
+        """Get path to vco-photos.app bundle for TCC Photos permission."""
+        app_path = Path(__file__).parent.parent.parent.parent / "swift" / "vco-photos.app"
+        executable = app_path / "Contents" / "MacOS" / "vco-photos"
+
+        if not executable.exists():
+            raise PhotosAccessError(
+                "vco-photos.app not found. Copy binary: "
+                "cp swift/.build/release/vco-photos swift/vco-photos.app/Contents/MacOS/"
+            )
+
+        # Update binary if stale
+        if self._binary_path.stat().st_mtime > executable.stat().st_mtime:
+            shutil.copy2(str(self._binary_path), str(executable))
+            subprocess.run(
+                ["codesign", "--force", "--sign", "-", str(app_path)],
+                capture_output=True,
+                timeout=10,
+            )
+
+        return app_path
+
     def _execute_command(
         self,
         command: str,
         args: dict[str, Any] | None = None,
         timeout: int | None = None,
     ) -> dict[str, Any]:
-        """Execute a command via the Swift binary.
+        """Execute a command via the Swift binary using .app bundle for Photos permission.
 
         Args:
             command: Command name (scan, import, delete, export, download)
@@ -103,28 +127,53 @@ class SwiftBridge:
         request = {"command": command, "args": args or {}}
         request_json = json.dumps(request)
 
-        try:
-            result = subprocess.run(
-                [str(self._binary_path)],
-                input=request_json,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+        app_path = self._get_app_bundle()
+        input_file = Path(tempfile.mktemp(suffix=".json", prefix="vco_in_"))
+        output_file = Path(tempfile.mktemp(suffix=".json", prefix="vco_out_"))
 
-            # Parse response
-            if not result.stdout.strip():
-                raise PhotosAccessError(f"Empty response from vco-photos. stderr: {result.stderr}")
+        try:
+            input_file.write_text(request_json)
+            # Remove output file if exists to detect completion
+            if output_file.exists():
+                output_file.unlink()
 
             try:
-                response: dict[str, Any] = json.loads(result.stdout)
+                result = subprocess.run(
+                    [
+                        "open",
+                        "-n",
+                        "-W",
+                        str(app_path),
+                        "--args",
+                        "--input-file",
+                        str(input_file),
+                        "--output-file",
+                        str(output_file),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                raise PhotosAccessError(f"Command '{command}' timed out after {timeout}s")
+
+            if result.returncode != 0:
+                raise PhotosAccessError(f"Failed to launch app: {result.stderr}")
+
+            if not output_file.exists():
+                raise PhotosAccessError("No output from vco-photos")
+
+            response_text = output_file.read_text().strip()
+            if not response_text:
+                raise PhotosAccessError("Empty response from vco-photos")
+
+            try:
+                response: dict[str, Any] = json.loads(response_text)
             except json.JSONDecodeError as e:
                 raise PhotosAccessError(
-                    f"Invalid JSON response from vco-photos: {e}. "
-                    f"stdout: {result.stdout}, stderr: {result.stderr}"
+                    f"Invalid JSON response from vco-photos: {e}. output: {response_text}"
                 )
 
-            # Check for errors
             if not response.get("success", False):
                 error = response.get("error", {})
                 error_type = error.get("type", "unknown")
@@ -133,10 +182,9 @@ class SwiftBridge:
 
             return response
 
-        except subprocess.TimeoutExpired:
-            raise PhotosAccessError(f"Command '{command}' timed out after {timeout}s")
-        except FileNotFoundError:
-            raise PhotosAccessError(f"vco-photos binary not found: {self._binary_path}")
+        finally:
+            input_file.unlink(missing_ok=True)
+            output_file.unlink(missing_ok=True)
 
     def _parse_video_info(self, data: dict[str, Any]) -> VideoInfo:
         """Parse VideoInfo from Swift response data.
@@ -369,12 +417,18 @@ class SwiftBridge:
         except FileNotFoundError:
             raise PhotosAccessError(f"vco-photos binary not found: {self._binary_path}")
 
-    def import_video(self, video_path: Path, album_names: list[str] | None = None) -> str:
+    def import_video(
+        self,
+        video_path: Path,
+        album_names: list[str] | None = None,
+        capture_date: datetime | None = None,
+    ) -> str:
         """Import a video into Photos library.
 
         Args:
             video_path: Path to the video file to import
             album_names: Optional list of album names to add the video to
+            capture_date: Optional capture date to set as the asset's creation date
 
         Returns:
             UUID of the imported video
@@ -388,6 +442,8 @@ class SwiftBridge:
         args: dict[str, Any] = {"path": str(video_path)}
         if album_names:
             args["album_names"] = album_names
+        if capture_date:
+            args["capture_date"] = capture_date.isoformat()
 
         response = self._execute_command("import", args)
         data = response.get("data", "")

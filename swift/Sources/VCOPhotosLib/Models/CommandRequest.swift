@@ -34,6 +34,9 @@ public struct CommandArgs: Codable {
     /// Album names for import
     public var albumNames: [String]?
     
+    /// Capture date for import (ISO 8601, used as creationDate in Photos)
+    public var captureDate: String?
+    
     enum CodingKeys: String, CodingKey {
         case fromDate = "from_date"
         case toDate = "to_date"
@@ -41,6 +44,7 @@ public struct CommandArgs: Codable {
         case path
         case destination
         case albumNames = "album_names"
+        case captureDate = "capture_date"
     }
     
     public init(
@@ -49,7 +53,8 @@ public struct CommandArgs: Codable {
         uuid: String? = nil,
         path: String? = nil,
         destination: String? = nil,
-        albumNames: [String]? = nil
+        albumNames: [String]? = nil,
+        captureDate: String? = nil
     ) {
         self.fromDate = fromDate
         self.toDate = toDate
@@ -57,5 +62,6 @@ public struct CommandArgs: Codable {
         self.path = path
         self.destination = destination
         self.albumNames = albumNames
+        self.captureDate = captureDate
     }
 }

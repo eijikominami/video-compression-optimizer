@@ -53,69 +53,81 @@ class TestSwiftBridgeCommandExecution:
         binary.chmod(0o755)
         return SwiftBridge(binary_path=binary)
 
-    def test_execute_command_success(self, bridge: SwiftBridge) -> None:
+    def test_execute_command_success(self, bridge: SwiftBridge, tmp_path: Path) -> None:
         """Test successful command execution."""
         mock_response = {"success": True, "data": []}
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(mock_response),
-                stderr="",
-            )
+        def fake_run(cmd, **kwargs):
+            # Find the --output-file arg and write response there
+            args = cmd
+            if "--output-file" in args:
+                idx = args.index("--output-file") + 1
+                Path(args[idx]).write_text(json.dumps(mock_response))
+            return MagicMock(returncode=0, stdout="", stderr="")
 
-            result = bridge._execute_command("scan")
-            assert result["success"] is True
-            assert result["data"] == []
+        with patch.object(bridge, "_get_app_bundle", return_value=tmp_path / "fake.app"):
+            with patch("subprocess.run", side_effect=fake_run):
+                result = bridge._execute_command("scan")
+                assert result["success"] is True
+                assert result["data"] == []
 
-    def test_execute_command_error_response(self, bridge: SwiftBridge) -> None:
+    def test_execute_command_error_response(self, bridge: SwiftBridge, tmp_path: Path) -> None:
         """Test command with error response."""
         mock_response = {
             "success": False,
             "error": {"type": "authorization_denied", "message": "Access denied"},
         }
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1,
-                stdout=json.dumps(mock_response),
-                stderr="",
-            )
+        def fake_run(cmd, **kwargs):
+            args = cmd
+            if "--output-file" in args:
+                idx = args.index("--output-file") + 1
+                Path(args[idx]).write_text(json.dumps(mock_response))
+            return MagicMock(returncode=0, stdout="", stderr="")
 
-            with pytest.raises(PhotosAccessError, match="authorization_denied"):
-                bridge._execute_command("scan")
+        with patch.object(bridge, "_get_app_bundle", return_value=tmp_path / "fake.app"):
+            with patch("subprocess.run", side_effect=fake_run):
+                with pytest.raises(PhotosAccessError, match="authorization_denied"):
+                    bridge._execute_command("scan")
 
-    def test_execute_command_timeout(self, bridge: SwiftBridge) -> None:
+    def test_execute_command_timeout(self, bridge: SwiftBridge, tmp_path: Path) -> None:
         """Test command timeout handling."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="vco-photos", timeout=60)
+        with patch.object(bridge, "_get_app_bundle", return_value=tmp_path / "fake.app"):
+            with patch(
+                "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="open", timeout=60)
+            ):
+                with pytest.raises(PhotosAccessError, match="timed out"):
+                    bridge._execute_command("scan", timeout=60)
 
-            with pytest.raises(PhotosAccessError, match="timed out"):
-                bridge._execute_command("scan", timeout=60)
-
-    def test_execute_command_invalid_json(self, bridge: SwiftBridge) -> None:
+    def test_execute_command_invalid_json(self, bridge: SwiftBridge, tmp_path: Path) -> None:
         """Test handling of invalid JSON response."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout="not valid json",
-                stderr="",
-            )
 
-            with pytest.raises(PhotosAccessError, match="Invalid JSON"):
-                bridge._execute_command("scan")
+        def fake_run(cmd, **kwargs):
+            args = cmd
+            if "--output-file" in args:
+                idx = args.index("--output-file") + 1
+                Path(args[idx]).write_text("not valid json")
+            return MagicMock(returncode=0, stdout="", stderr="")
 
-    def test_execute_command_empty_response(self, bridge: SwiftBridge) -> None:
+        with patch.object(bridge, "_get_app_bundle", return_value=tmp_path / "fake.app"):
+            with patch("subprocess.run", side_effect=fake_run):
+                with pytest.raises(PhotosAccessError, match="Invalid JSON"):
+                    bridge._execute_command("scan")
+
+    def test_execute_command_empty_response(self, bridge: SwiftBridge, tmp_path: Path) -> None:
         """Test handling of empty response."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout="",
-                stderr="",
-            )
 
-            with pytest.raises(PhotosAccessError, match="Empty response"):
-                bridge._execute_command("scan")
+        def fake_run(cmd, **kwargs):
+            args = cmd
+            if "--output-file" in args:
+                idx = args.index("--output-file") + 1
+                Path(args[idx]).write_text("")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.object(bridge, "_get_app_bundle", return_value=tmp_path / "fake.app"):
+            with patch("subprocess.run", side_effect=fake_run):
+                with pytest.raises(PhotosAccessError, match="Empty response"):
+                    bridge._execute_command("scan")
 
 
 class TestSwiftBridgeVideoInfoParsing:
@@ -207,13 +219,7 @@ class TestSwiftBridgePhotosInterface:
             ],
         }
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(mock_response),
-                stderr="",
-            )
-
+        with patch.object(bridge, "_execute_command", return_value=mock_response):
             videos = bridge.get_all_videos()
 
             assert len(videos) == 2
@@ -227,13 +233,7 @@ class TestSwiftBridgePhotosInterface:
             "data": [{"uuid": "ABC123", "filename": "video1.mov"}],
         }
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(mock_response),
-                stderr="",
-            )
-
+        with patch.object(bridge, "_execute_command", return_value=mock_response) as mock_exec:
             from_date = datetime(2024, 1, 1)
             to_date = datetime(2024, 12, 31)
 
@@ -241,10 +241,10 @@ class TestSwiftBridgePhotosInterface:
 
             assert len(videos) == 1
             # Verify args were passed correctly
-            call_args = mock_run.call_args
-            input_json = json.loads(call_args.kwargs["input"])
-            assert "from_date" in input_json["args"]
-            assert "to_date" in input_json["args"]
+            call_args = mock_exec.call_args
+            assert "from_date" in call_args[1].get(
+                "args", call_args[0][1] if len(call_args[0]) > 1 else {}
+            )
 
     def test_import_video(self, bridge: SwiftBridge, tmp_path: Path) -> None:
         """Test import_video method."""
@@ -253,13 +253,7 @@ class TestSwiftBridgePhotosInterface:
 
         mock_response = {"success": True, "data": "NEW-UUID-123"}
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(mock_response),
-                stderr="",
-            )
-
+        with patch.object(bridge, "_execute_command", return_value=mock_response):
             uuid = bridge.import_video(video_file, album_names=["Test Album"])
 
             assert uuid == "NEW-UUID-123"
@@ -273,13 +267,7 @@ class TestSwiftBridgePhotosInterface:
         """Test delete_video method."""
         mock_response = {"success": True, "data": True}
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(mock_response),
-                stderr="",
-            )
-
+        with patch.object(bridge, "_execute_command", return_value=mock_response):
             result = bridge.delete_video("ABC123")
 
             assert result is True
