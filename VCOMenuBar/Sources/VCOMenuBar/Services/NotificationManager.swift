@@ -1,7 +1,16 @@
 import Foundation
 import UserNotifications
 
-class NotificationManager {
+protocol NotificationManaging {
+    func requestPermission()
+    func sendPipelineComplete(successful: Int, failed: Int)
+    func sendAuthExpired()
+    func sendDiskSpaceInsufficient()
+    func sendAllFilesFailed()
+    func sendDeleteOriginalFailed(filename: String)
+}
+
+class NotificationManager: NotificationManaging {
     private var center: UNUserNotificationCenter?
 
     init() {

@@ -12,7 +12,7 @@ class PipelineController: ObservableObject {
     let cliRunner: CLIRunner
     let stateStore: StateStore
     let configReader: ConfigReader
-    let notificationManager: NotificationManager
+    let notificationManager: NotificationManaging
 
     private var pollingTimer: Timer?
     private var lastPolledStatus: String?
@@ -22,7 +22,7 @@ class PipelineController: ObservableObject {
         cliRunner: CLIRunner = CLIRunner(),
         stateStore: StateStore = StateStore(),
         configReader: ConfigReader = ConfigReader(),
-        notificationManager: NotificationManager = NotificationManager()
+        notificationManager: NotificationManaging = NotificationManager()
     ) {
         self.cliRunner = cliRunner
         self.stateStore = stateStore
