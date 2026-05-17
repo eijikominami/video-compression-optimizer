@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Swift Universal Binary (arm64 + x86_64) を CI でビルド・添付
   - Codecov によるカバレッジレポート
 
+### Fixed
+
+- **Photos import の撮影日保持**
+  - `vco import` 時に capture_date が失われる問題を修正
+  - .app バンドル経由の `open -n -W` 呼び出しで macOS TCC 権限問題を解決
+- **SwiftBridge の簡素化・バグ修正**
+  - `download_from_icloud` を `_execute_command` に統一（コード 70 行削減）
+  - `_parse_video_info` の未定義変数 `path_str` を修正
+  - iCloud ダウンロードタイムアウトを 300s → 1800s に延長
+- **VCOMenuBar の CLI レスポンスフィールド名修正**
+  - `ScanSummary` のフィールドを CLI 出力に合わせてリネーム（`conversionCandidates`, `estimatedTotalSavingsBytes`）
+
 ### Removed
 
 - **FFmpeg Lambda Layer スクリプトを削除**
