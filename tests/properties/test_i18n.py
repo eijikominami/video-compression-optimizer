@@ -184,6 +184,7 @@ class TestAllKeysHaveTranslations:
         "convert.skip_icloud",
         "convert.download_timeout",
         "convert.yes",
+        "convert.json",
         "import.description",
         "import.list",
         "import.all",
