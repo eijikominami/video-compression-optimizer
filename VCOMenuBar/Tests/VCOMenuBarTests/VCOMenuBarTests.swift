@@ -193,15 +193,31 @@ final class CLIRunnerTests: XCTestCase {
 
 @MainActor
 final class PipelineControllerTests: XCTestCase {
+    class MockNotificationManager: NotificationManaging {
+        var requestPermissionCalled = false
+        var pipelineCompleteArgs: (successful: Int, failed: Int)?
+        var authExpiredCalled = false
+        var diskSpaceCalled = false
+        var allFilesFailedCalled = false
+        var deleteOriginalFailedFilename: String?
+
+        func requestPermission() { requestPermissionCalled = true }
+        func sendPipelineComplete(successful: Int, failed: Int) { pipelineCompleteArgs = (successful, failed) }
+        func sendAuthExpired() { authExpiredCalled = true }
+        func sendDiskSpaceInsufficient() { diskSpaceCalled = true }
+        func sendAllFilesFailed() { allFilesFailedCalled = true }
+        func sendDeleteOriginalFailed(filename: String) { deleteOriginalFailedFilename = filename }
+    }
+
     func testInitialState() {
-        let controller = PipelineController()
+        let controller = PipelineController(notificationManager: MockNotificationManager())
         XCTAssertEqual(controller.stage, .idle)
         XCTAssertTrue(controller.files.isEmpty)
         XCTAssertFalse(controller.isCancelRequested)
     }
 
     func testRequestStop() {
-        let controller = PipelineController()
+        let controller = PipelineController(notificationManager: MockNotificationManager())
         controller.stage = .polling
         controller.requestStop()
         XCTAssertTrue(controller.isCancelRequested)
@@ -209,7 +225,7 @@ final class PipelineControllerTests: XCTestCase {
     }
 
     func testRequestStopWhenIdle() {
-        let controller = PipelineController()
+        let controller = PipelineController(notificationManager: MockNotificationManager())
         controller.requestStop()
         XCTAssertFalse(controller.isCancelRequested)
         XCTAssertEqual(controller.stage, .idle)
