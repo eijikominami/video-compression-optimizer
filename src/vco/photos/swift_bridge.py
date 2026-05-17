@@ -29,7 +29,7 @@ class SwiftBridge:
     DEFAULT_TIMEOUT = 600
 
     # Timeout for iCloud downloads (seconds)
-    DOWNLOAD_TIMEOUT = 300
+    DOWNLOAD_TIMEOUT = 1800
 
     def __init__(self, binary_path: Path | None = None):
         """Initialize SwiftBridge.
@@ -220,16 +220,13 @@ class SwiftBridge:
         if data.get("resolution") and len(data["resolution"]) == 2:
             resolution = tuple(data["resolution"])
 
-        # Determine is_local based on path and Swift response
-        # If path is empty or "/unknown", the file is not locally available
-        path_str = data.get("path", "")
-        has_valid_path = bool(path_str) and path_str != "/unknown"
-        is_local = data.get("is_local", False) and has_valid_path
+        # Determine is_local from Swift response
+        is_local = data.get("is_local", False)
 
         return VideoInfo(
             uuid=data.get("uuid", ""),
             filename=data.get("filename", ""),
-            path=Path(path_str) if path_str else Path("/unknown"),
+            path=Path(data.get("path", "")) if data.get("path") else Path("/unknown"),
             codec=data.get("codec", "unknown"),
             resolution=resolution,
             bitrate=data.get("bitrate", 0),
@@ -347,75 +344,13 @@ class SwiftBridge:
         if video.is_local and video.path.exists():
             return video.path
 
-        # Use streaming mode to capture progress updates
-        request = {"command": "download", "args": {"uuid": video.uuid}}
-        request_json = json.dumps(request)
-
-        try:
-            process = subprocess.Popen(
-                [str(self._binary_path)],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            # Send command and close stdin
-            if process.stdin:
-                process.stdin.write(request_json)
-                process.stdin.close()
-
-            # Read stdout line by line for progress updates
-            final_response = None
-            if process.stdout:
-                for line in process.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    try:
-                        data = json.loads(line)
-
-                        # Check if this is a progress update
-                        if data.get("type") == "progress":
-                            if progress_callback:
-                                progress_callback(data.get("percent", 0))
-                        # Check if this is the final response
-                        elif "success" in data:
-                            final_response = data
-                            break
-                    except json.JSONDecodeError:
-                        # Skip non-JSON lines
-                        continue
-
-            # Wait for process to complete with timeout
-            try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                raise PhotosAccessError(f"Download timed out after {timeout}s")
-
-            # Handle response
-            if final_response is None:
-                stderr_output = process.stderr.read() if process.stderr else ""
-                raise PhotosAccessError(
-                    f"No response from download command. stderr: {stderr_output}"
-                )
-
-            if not final_response.get("success", False):
-                error = final_response.get("error", {})
-                error_type = error.get("type", "unknown")
-                error_message = error.get("message", "Unknown error")
-                raise PhotosAccessError(f"[{error_type}] {error_message}")
-
-            path_str = final_response.get("data", "")
-            if not path_str:
-                raise PhotosAccessError("Download returned empty path")
-
-            return Path(path_str)
-
-        except FileNotFoundError:
-            raise PhotosAccessError(f"vco-photos binary not found: {self._binary_path}")
+        response = self._execute_command(
+            "download", {"uuid": video.uuid}, timeout=timeout or self.DOWNLOAD_TIMEOUT
+        )
+        path_str = response.get("data", "")
+        if not path_str:
+            raise PhotosAccessError("Download returned empty path")
+        return Path(path_str)
 
     def import_video(
         self,

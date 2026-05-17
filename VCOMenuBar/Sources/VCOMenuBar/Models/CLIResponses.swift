@@ -8,12 +8,12 @@ struct ScanResponse: Codable {
 }
 
 struct ScanSummary: Codable {
-    let totalCandidates: Int
-    let totalSavingsBytes: Int
+    let conversionCandidates: Int
+    let estimatedTotalSavingsBytes: Int
 
     enum CodingKeys: String, CodingKey {
-        case totalCandidates = "total_candidates"
-        case totalSavingsBytes = "total_savings_bytes"
+        case conversionCandidates = "conversion_candidates"
+        case estimatedTotalSavingsBytes = "estimated_total_savings_bytes"
     }
 }
 

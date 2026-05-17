@@ -296,16 +296,7 @@ class TestSwiftBridgePhotosInterface:
 
         mock_response = {"success": True, "data": "/tmp/downloaded/test.mov"}
 
-        # download_from_icloud uses subprocess.Popen for streaming progress
-        with patch("subprocess.Popen") as mock_popen:
-            mock_process = MagicMock()
-            mock_process.stdin = MagicMock()
-            mock_process.stdout = iter([json.dumps(mock_response) + "\n"])
-            mock_process.stderr = MagicMock()
-            mock_process.stderr.read.return_value = ""
-            mock_process.wait.return_value = None
-            mock_popen.return_value = mock_process
-
+        with patch.object(bridge, "_execute_command", return_value=mock_response):
             path = bridge.download_from_icloud(video)
 
             assert path == Path("/tmp/downloaded/test.mov")
