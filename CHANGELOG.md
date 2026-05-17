@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **macOS メニューバーアプリ (VCOMenuBar)**
+  - メニューバーからワンクリックで scan → convert → polling → import パイプラインを全自動実行
+  - リアルタイムステータス表示（ステージ、ファイルごとの進捗）
+  - AWS 変換完了の自動ポーリング（60秒間隔）
+  - エラーリカバリ（ディスク容量不足リトライ、認証期限切れ通知、ネットワークエラー）
+  - アプリ再起動後の状態復元（State_Store）
+  - macOS 通知（パイプライン完了、認証エラー、ディスク不足）
+  - 停止ボタン（現在のコマンド完了後に安全停止）
+
+- **CLI 改善**
+  - `vco convert --json` フラグ追加（出力: `{task_id, file_count, status}`）
+  - `vco import --json` に `original_deleted` / `original_delete_error` フィールド追加
+
 - **並列転送機能**
   - `vco convert --parallel N` オプションで同時転送数を設定（デフォルト: 3、範囲: 1-10）
   - iCloud ダウンロードと S3 アップロードを並列実行

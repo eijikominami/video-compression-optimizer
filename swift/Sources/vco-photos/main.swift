@@ -6,13 +6,26 @@ import VCOPhotosLib
 @main
 struct VCOPhotos {
     static func main() async {
-        // Read JSON from stdin (read all available data)
-        var inputData = Data()
-        while let line = readLine(strippingNewline: false) {
-            inputData.append(contentsOf: line.utf8)
+        // Read JSON from: 1) --input-file argument, 2) first CLI argument, 3) stdin
+        let input: String
+        let args = CommandLine.arguments
+        if let fileIdx = args.firstIndex(of: "--input-file"), fileIdx + 1 < args.count {
+            let filePath = args[fileIdx + 1]
+            guard let data = FileManager.default.contents(atPath: filePath),
+                  let str = String(data: data, encoding: .utf8) else {
+                outputError(ErrorInfo(type: .unknown, message: "Cannot read input file: \(filePath)"))
+                Foundation.exit(1)
+            }
+            input = str
+        } else if args.count > 1 && !args[1].hasPrefix("-") {
+            input = args[1]
+        } else {
+            var inputData = Data()
+            while let line = readLine(strippingNewline: false) {
+                inputData.append(contentsOf: line.utf8)
+            }
+            input = String(data: inputData, encoding: .utf8) ?? ""
         }
-        
-        let input = String(data: inputData, encoding: .utf8) ?? ""
         guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             outputError(ErrorInfo(type: .unknown, message: "No input provided"))
             Foundation.exit(1)
@@ -34,6 +47,12 @@ struct VCOPhotos {
         do {
             let jsonString = try JSONCoding.encode(response)
             print(jsonString)
+            // If --output-file specified, also write there
+            if let outIdx = CommandLine.arguments.firstIndex(of: "--output-file"),
+               outIdx + 1 < CommandLine.arguments.count {
+                let outPath = CommandLine.arguments[outIdx + 1]
+                try jsonString.write(toFile: outPath, atomically: true, encoding: .utf8)
+            }
         } catch {
             outputError(ErrorInfo(type: .unknown, message: "Failed to encode response: \(error)"))
             Foundation.exit(1)

@@ -480,9 +480,12 @@ class UnifiedImportService:
 
         # Import to Photos (with albums if available)
         try:
+            # Pass capture_date to ensure Photos uses original date, not import time
+            capture_date = original_metadata.capture_date if original_metadata else None
             new_uuid = self.swift_bridge.import_video(
                 video_path=local_path,
                 album_names=albums if albums else None,
+                capture_date=capture_date,
             )
             if not new_uuid:
                 return UnifiedImportResult(

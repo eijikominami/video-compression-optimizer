@@ -368,6 +368,33 @@ ruff check src/ tests/
 mypy src/
 ```
 
+## MenuBar App (macOS)
+
+A native macOS menu bar app that automates the full `scan → convert → polling → import` pipeline with one click.
+
+### Build & Run
+
+```bash
+cd VCOMenuBar
+swift build
+swift test
+```
+
+### Features
+
+- One-click pipeline execution from the menu bar
+- Real-time status display (per-file progress)
+- Automatic polling for AWS conversion completion
+- Error recovery (disk space retry, auth expiry notification)
+- State persistence across app restarts
+- macOS notifications for pipeline events
+
+### Requirements
+
+- macOS 13.0 (Ventura) or later
+- `vco` CLI installed and in PATH
+- `~/.config/vco/config.json` configured
+
 ## License
 
 MIT License
