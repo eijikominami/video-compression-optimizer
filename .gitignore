@@ -61,3 +61,9 @@ samconfig.toml
 
 # Local config
 .env
+.env.*
+*.pem
+*.key
+credentials
+**/credentials
+*.p12

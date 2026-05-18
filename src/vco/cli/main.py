@@ -11,6 +11,7 @@ Usage:
 """
 
 import json
+import os
 import signal
 import sys
 from datetime import datetime, timezone
@@ -248,6 +249,9 @@ def convert(
     yes: bool,
 ):
     """Convert candidate videos to H.265."""
+    global console
+    if output_json:
+        console = Console(file=open(os.devnull, "w"))
     config = ctx.obj["config"]
 
     # Get download timeout from option or config
@@ -328,6 +332,18 @@ def convert(
     final_candidates = local_candidates + downloaded_candidates
 
     if not final_candidates:
+        if output_json:
+            click.echo(
+                json.dumps(
+                    {
+                        "task_id": None,
+                        "file_count": 0,
+                        "status": "error",
+                        "error_message": "All iCloud downloads failed. No local files available.",
+                    }
+                )
+            )
+            sys.exit(1)
         console.print("[yellow]No local files available for conversion.[/yellow]")
         if icloud_candidates and not skip_icloud:
             console.print(
@@ -412,6 +428,9 @@ def import_cmd(
     item_id: str | None,
 ):
     """Import converted videos to Photos library."""
+    global console
+    if output_json:
+        console = Console(file=open(os.devnull, "w"))
     from vco.services.aws_import import AwsImportService
     from vco.services.unified_import import UnifiedImportService
 

@@ -22,12 +22,19 @@ class PipelineController: ObservableObject {
         cliRunner: CLIRunner = CLIRunner(),
         stateStore: StateStore = StateStore(),
         configReader: ConfigReader = ConfigReader(),
-        notificationManager: NotificationManaging = NotificationManager()
+        notificationManager: NotificationManaging = NotificationManager(),
+        restoreOnInit: Bool = false
     ) {
         self.cliRunner = cliRunner
         self.stateStore = stateStore
         self.configReader = configReader
         self.notificationManager = notificationManager
+        if restoreOnInit {
+            Task { @MainActor in
+                self.notificationManager.requestPermission()
+                await self.restoreOnLaunch()
+            }
+        }
     }
 
     // MARK: - Public
@@ -273,8 +280,7 @@ class PipelineController: ObservableObject {
                 break
             }
 
-            if let statusResponse = try? cliRunner.parseJSON(StatusResponse.self, from: result.stdout),
-               let task = statusResponse.tasks.first {
+            if let task = try? cliRunner.parseJSON(TaskStatus.self, from: result.stdout) {
                 // Update file states from polling
                 if let taskFiles = task.files {
                     for tf in taskFiles {
@@ -286,6 +292,12 @@ class PipelineController: ObservableObject {
                                 files[idx].errorReason = tf.errorMessage
                             } else { files[idx].status = .processing }
                         }
+                    }
+                } else if let progress = task.progressPercentage {
+                    // No per-file info; apply task-level progress to all pending files
+                    for idx in files.indices where files[idx].status == .pending || files[idx].status == .processing {
+                        files[idx].status = .processing
+                        files[idx].progressPercentage = progress
                     }
                 }
                 updateSummary()
@@ -301,7 +313,7 @@ class PipelineController: ObservableObject {
                 }
 
                 // Check if all done
-                if task.status == "COMPLETED" || task.status == "FAILED" {
+                if task.status == "COMPLETED" || task.status == "FAILED" || task.status == "PARTIALLY_COMPLETED" {
                     break
                 }
             }
