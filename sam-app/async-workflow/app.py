@@ -358,7 +358,18 @@ def check_conversion_status(event: dict) -> dict:
     file_id = file_info.get("file_id")
 
     mc = get_mediaconvert_client()
-    response = mc.get_job(Id=job_id)
+
+    # get_job with exponential backoff for TooManyRequestsException
+    for attempt in range(5):
+        try:
+            response = mc.get_job(Id=job_id)
+            break
+        except mc.exceptions.TooManyRequestsException:
+            if attempt == 4:
+                raise
+            import time
+            time.sleep(2 ** attempt)
+
     job = response["Job"]
 
     status = job["Status"]

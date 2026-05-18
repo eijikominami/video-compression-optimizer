@@ -79,10 +79,11 @@ class CLIRunner {
         process.standardError = stderrPipe
 
         try process.run()
-        process.waitUntilExit()
 
+        // Read data before waitUntilExit to avoid pipe buffer deadlock
         let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
 
         return CLIResult(exitCode: process.terminationStatus, stdout: stdout, stderr: stderr)
     }

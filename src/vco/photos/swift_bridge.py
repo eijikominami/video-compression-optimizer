@@ -60,7 +60,7 @@ class SwiftBridge:
 
         # Check Swift build directories
         swift_dir = Path(__file__).parent.parent.parent.parent / "swift"
-        for build_type in ["debug", "release"]:
+        for build_type in ["release", "debug"]:
             build_path = swift_dir / ".build" / build_type / "vco-photos"
             if build_path.exists():
                 return build_path
@@ -82,17 +82,15 @@ class SwiftBridge:
 
     def _get_app_bundle(self) -> Path:
         """Get path to vco-photos.app bundle for TCC Photos permission."""
-        app_path = Path(__file__).parent.parent.parent.parent / "swift" / "vco-photos.app"
+        app_path = Path.home() / ".local" / "share" / "vco" / "vco-photos.app"
         executable = app_path / "Contents" / "MacOS" / "vco-photos"
+        plist_src = Path(__file__).parent.parent.parent.parent / "swift" / "vco-photos.app" / "Contents" / "Info.plist"
 
-        if not executable.exists():
-            raise PhotosAccessError(
-                "vco-photos.app not found. Copy binary: "
-                "cp swift/.build/release/vco-photos swift/vco-photos.app/Contents/MacOS/"
-            )
-
-        # Update binary if stale
-        if self._binary_path.stat().st_mtime > executable.stat().st_mtime:
+        if not executable.exists() or self._binary_path.stat().st_mtime > executable.stat().st_mtime:
+            macos_dir = app_path / "Contents" / "MacOS"
+            macos_dir.mkdir(parents=True, exist_ok=True)
+            if plist_src.exists():
+                shutil.copy2(str(plist_src), str(app_path / "Contents" / "Info.plist"))
             shutil.copy2(str(self._binary_path), str(executable))
             subprocess.run(
                 ["codesign", "--force", "--sign", "-", str(app_path)],
